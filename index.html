@@ -1409,27 +1409,117 @@ function delL(id){try{var l=JSON.parse(localStorage.getItem('mc_lib')||'[]');loc
 function noCrmPushFromForm(){
   var d=getData();
   if(!d.cl.s&&!d.cl.c){toast('Renseignez le client avant d\'envoyer vers NoCRM.','er');return;}
-  var btn=document.querySelector('.nocrm-btn-primary[onclick*="noCrmPushFromForm"]');
-  if(btn){btn.textContent='⏳ Envoi...';btn.disabled=true;}
-  // If already linked to a lead, add a note instead of creating
+
+  var client=d.cl.s||d.cl.c||'';
+  var montant=d.prix.reduce(function(s,p){return s+(parseFloat(p.v)||0)*(parseInt(p.q)||1);},0)||0;
+  var fl={'both':'Invest + LLD','invest':'Investissement','lld':'LLD','carsat':'CARSAT FIPU'};
+  var formule=fl[d.f]||d.f||'';
+
   if(_noCrmLinkedId){
-    var note='Proposition N°'+(d.off.n||'—')+' générée le '+new Date().toLocaleDateString('fr-FR')+'\nMontant : '+(d.prix.reduce(function(s,p){return s+(parseFloat(p.v)||0)*(parseInt(p.q)||1);},0)||0).toLocaleString('fr-FR')+'€ HT\nFormule : '+(d.f||'')+'\nMatériel : '+(d.cat||'');
-    noCrmAddNote(_noCrmLinkedId,note).then(function(r){
-      if(btn){btn.textContent='🔗 NoCRM';btn.disabled=false;}
-      if(r.ok){toast('Note ajoutée au lead NoCRM !','ok');}else{toast('Erreur NoCRM ('+r.status+')','er');}
-    }).catch(function(){if(btn){btn.textContent='🔗 NoCRM';btn.disabled=false;}toast('Erreur réseau NoCRM','er');});
+    // Confirmation avant ajout de note
+    noCrmShowConfirm(
+      '📝 Ajouter une note sur ce lead ?',
+      'Une note sera ajoutée sur le lead <b>'+client+'</b> dans NoCRM avec les informations suivantes :<br><br>'+
+      '• Offre N° <b>'+(d.off.n||'—')+'</b><br>'+
+      '• Montant : <b>'+montant.toLocaleString('fr-FR')+'€ HT</b><br>'+
+      '• Formule : <b>'+formule+'</b><br>'+
+      '• Matériel : <b>'+(d.cat||'')+'</b>',
+      'Ajouter la note',
+      function(){
+        var btn=document.querySelector('.nocrm-btn-primary[onclick*="noCrmPushFromForm"]');
+        if(btn){btn.textContent='⏳ Envoi...';btn.disabled=true;}
+        var note='📄 Proposition N°'+(d.off.n||'—')+' — '+new Date().toLocaleDateString('fr-FR')+
+          '\nMontant : '+montant.toLocaleString('fr-FR')+'€ HT'+
+          '\nFormule : '+formule+
+          '\nMatériel : '+(d.cat||'')+
+          '\nCommercial : '+(d.com.n||'');
+        noCrmAddNote(_noCrmLinkedId,note).then(function(r){
+          if(btn){btn.textContent='🔗 NoCRM';btn.disabled=false;}
+          if(r.ok){
+            noCrmShowSuccess('✅ Note ajoutée !','La note a bien été enregistrée sur le lead <b>'+client+'</b> dans NoCRM.');
+          }else{
+            toast('Erreur NoCRM ('+r.status+')','er');
+          }
+        }).catch(function(){
+          if(btn){btn.textContent='🔗 NoCRM';btn.disabled=false;}
+          toast('Erreur réseau NoCRM','er');
+        });
+      }
+    );
   }else{
-    noCrmPushLead(d).then(function(res){
-      if(btn){btn.textContent='🔗 NoCRM';btn.disabled=false;}
-      if(res.ok){
-        _noCrmLinkedId=res.data.id;
-        var ind=document.getElementById('nocrm-sync-ind');var nameEl=document.getElementById('nocrm-linked-name');
-        if(ind)ind.style.display='inline-flex';if(nameEl)nameEl.textContent=d.cl.s||d.cl.c||'';
-        _noCrmLeads.unshift(res.data);
-        toast('Lead créé dans NoCRM !','ok');
-      }else{toast('Erreur NoCRM : '+(res.data.message||res.status),'er');}
-    }).catch(function(){if(btn){btn.textContent='🔗 NoCRM';btn.disabled=false;}toast('Erreur réseau NoCRM','er');});
+    // Confirmation avant création de lead
+    noCrmShowConfirm(
+      '🔗 Créer un lead dans NoCRM ?',
+      'Un nouveau lead sera créé dans NoCRM avec les informations suivantes :<br><br>'+
+      '• Société : <b>'+client+'</b><br>'+
+      (d.cl.c?'• Contact : <b>'+d.cl.c+'</b><br>':'')+
+      (d.cl.e?'• Email : <b>'+d.cl.e+'</b><br>':'')+
+      (d.cl.t?'• Tél : <b>'+d.cl.t+'</b><br>':'')+
+      '• Montant : <b>'+montant.toLocaleString('fr-FR')+'€ HT</b><br>'+
+      '• Formule : <b>'+formule+'</b>',
+      'Créer le lead',
+      function(){
+        var btn=document.querySelector('.nocrm-btn-primary[onclick*="noCrmPushFromForm"]');
+        if(btn){btn.textContent='⏳ Création...';btn.disabled=true;}
+        noCrmPushLead(d).then(function(res){
+          if(btn){btn.textContent='🔗 NoCRM';btn.disabled=false;}
+          if(res.ok){
+            _noCrmLinkedId=res.data.id;
+            var ind=document.getElementById('nocrm-sync-ind');
+            var nameEl=document.getElementById('nocrm-linked-name');
+            if(ind)ind.style.display='inline-flex';
+            if(nameEl)nameEl.textContent=client;
+            _noCrmLeads.unshift(res.data);
+            noCrmShowSuccess('✅ Lead créé !','Le lead <b>'+client+'</b> a bien été créé dans NoCRM.<br><br>Il apparaîtra dans votre pipeline sous le nom :<br><b>'+(res.data.title||client)+'</b>');
+          }else{
+            toast('Erreur NoCRM : '+(res.data&&res.data.message||res.status),'er');
+          }
+        }).catch(function(){
+          if(btn){btn.textContent='🔗 NoCRM';btn.disabled=false;}
+          toast('Erreur réseau NoCRM','er');
+        });
+      }
+    );
   }
+}
+
+// Modale de confirmation NoCRM
+function noCrmShowConfirm(title, body, btnLabel, onConfirm){
+  var existing=document.getElementById('nocrm-modal');
+  if(existing) existing.remove();
+  var m=document.createElement('div');
+  m.id='nocrm-modal';
+  m.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  m.innerHTML='<div style="background:#fff;border-radius:14px;box-shadow:0 8px 40px #0004;width:100%;max-width:440px;overflow:hidden">'+
+    '<div style="background:linear-gradient(135deg,#e84393,#c0146c);padding:16px 20px;color:#fff">'+
+    '<div style="font-size:15px;font-weight:700">'+title+'</div></div>'+
+    '<div style="padding:18px 20px;font-size:13px;line-height:1.7;color:#333">'+body+'</div>'+
+    '<div style="display:flex;gap:8px;padding:12px 20px;background:#f8f9fb;border-top:1px solid #eee">'+
+    '<button onclick="document.getElementById(\'nocrm-modal\').remove()" style="flex:1;padding:10px;border:1.5px solid #d0d5dd;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:#666">Annuler</button>'+
+    '<button id="nocrm-confirm-btn" style="flex:2;padding:10px;background:linear-gradient(135deg,#e84393,#c0146c);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">'+btnLabel+'</button>'+
+    '</div></div>';
+  document.body.appendChild(m);
+  document.getElementById('nocrm-confirm-btn').onclick=function(){m.remove();onConfirm();};
+  m.onclick=function(e){if(e.target===m)m.remove();};
+}
+
+// Modale de succès NoCRM
+function noCrmShowSuccess(title, body){
+  var existing=document.getElementById('nocrm-modal');
+  if(existing) existing.remove();
+  var m=document.createElement('div');
+  m.id='nocrm-modal';
+  m.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  m.innerHTML='<div style="background:#fff;border-radius:14px;box-shadow:0 8px 40px #0004;width:100%;max-width:400px;overflow:hidden">'+
+    '<div style="background:linear-gradient(135deg,#1a7a4a,#155724);padding:16px 20px;color:#fff">'+
+    '<div style="font-size:15px;font-weight:700">'+title+'</div></div>'+
+    '<div style="padding:18px 20px;font-size:13px;line-height:1.7;color:#333">'+body+'</div>'+
+    '<div style="padding:12px 20px;background:#f8f9fb;border-top:1px solid #eee;text-align:right">'+
+    '<button onclick="document.getElementById(\'nocrm-modal\').remove()" style="padding:10px 24px;background:linear-gradient(135deg,#1a7a4a,#155724);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">Fermer</button>'+
+    '</div></div>';
+  document.body.appendChild(m);
+  m.onclick=function(e){if(e.target===m)m.remove();};
+  setTimeout(function(){if(document.getElementById('nocrm-modal'))document.getElementById('nocrm-modal').remove();},6000);
 }
 
 // ===== KEYBOARD SHORTCUTS =====
