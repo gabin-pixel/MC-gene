@@ -1189,8 +1189,7 @@ async function buildDoc(d){
   var ch=[];
 
   // ===== PAGE 1: EN-TÊTE AVEC LOGO (point 1+10) =====
-  var logoBytes=dataUrlToUint8('data:image/jpeg;base64,'+LOGO_B64);
-  // Logo in header instead of body
+  // Logo removed from header to avoid JPEG/PNG type mismatch in Word
   
   ch.push(new D.Paragraph({alignment:D.AlignmentType.CENTER,children:[tr('PROPOSITION COMMERCIALE',{b:true,sz:28,c:'003087'})]}));
   ch.push(new D.Paragraph({border:{bottom:{style:D.BorderStyle.SINGLE,size:8,color:'F47C20',space:3}},spacing:{after:200},children:[tr('',{sz:18})]}));
@@ -1499,7 +1498,7 @@ async function buildDoc(d){
     headers:{default:new D.Header({children:[
       new D.Paragraph({
         children:[
-          logoBytes?new D.ImageRun({data:logoBytes,transformation:{width:180,height:47},type:'jpg'}):tr(''),
+          tr('MULTI-CHARIOTS.fr',{b:true,sz:18,c:'003087'}),
           tr('      Offre N° '+(d.off.n||'—')+'  |  '+(d.off.d?new Date(d.off.d+'T12:00:00').toLocaleDateString('fr-FR'):new Date().toLocaleDateString('fr-FR')),{sz:15,c:'888888'})
         ],
         border:{bottom:{style:D.BorderStyle.SINGLE,size:2,color:'F47C20',space:3}},
