@@ -1870,7 +1870,9 @@ function _secPrix(d){
 
   // Colonne vignette insérée seulement si une photo est disponible
   var TH=_THUMB?THUMB_COL:0;
-  var CW=[6634-TH,900,2500];
+  // Les colonnes doivent totaliser la largeur INTÉRIEURE du cadre (W − 2×240),
+  // sinon la dernière déborde à droite : 6154 + 900 + 2500 = 9554
+  var CW=[6154-TH,900,2500];
   var rows=[];
   function hCell(txt,w,al,padL,padR){
     return new _D.TableCell({width:{size:w,type:'dxa'},
