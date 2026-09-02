@@ -1337,312 +1337,488 @@ function dataUrlToUint8(dataUrl){
   }
 }
 
-// ===== BUILD DOCUMENT (all 12 points) =====
+// ===== BUILD DOCUMENT =====
 // ============================================================
 //  buildDoc — Générateur Word Multi-Chariots
-//  Architecture modulaire : chaque section = une fonction
-//  Ne jamais modifier sans lancer les tests unitaires
-//  Dernière reconstruction : 2026-06-11
+//  Rendu calé sur le design "Proposition Commerciale.dc.html"
+//  docx.js v8.5.0 — sortie via Packer.toBase64String()
+//  Sections numérotées dynamiquement (01, 02, 03 ...)
+//  Dernière reconstruction : design handoff Industry
 // ============================================================
 
-// Module-level D reference (set when buildDoc is called)
+// Référence module vers window.docx (initialisée par buildDoc)
 var _D=null;
-// ---- Helpers de bas niveau ----
+
+// ------------------------------------------------------------
+// DESIGN TOKENS  (transposition Word du design system Industry)
+// ------------------------------------------------------------
+var MC_ORANGE      = 'EE7D1F';   // --color-brand-orange
+var MC_ORANGE_SOFT = 'FBE6D3';   // orange 15 %  (fond de tag)
+var MC_ORANGE_INK  = '9C5210';   // orange 70 % + noir (texte de tag)
+var MC_ORANGE_PALE = 'FCE9D6';   // texte secondaire sur bandeau orange
+var MC_ACCENT      = '22384A';   // --color-accent-900 (bleu acier)
+var MC_ACCENT_700  = '4E6A7C';   // --color-accent-700 (kickers 0X —)
+var MC_INK         = '1D2328';   // --color-text
+var MC_MUTED       = '79858D';   // texte 55 %
+var MC_RULE        = 'D5DDE2';   // --color-divider
+var MC_HAIRLINE    = 'EBEFF2';   // filet 6 % des listes à coches
+var MC_BG          = 'F4F6F8';   // --color-bg
+var MC_WHITE       = 'FFFFFF';
+var MC_GREEN       = '1A7A4A';
+var MC_RED         = 'C0392B';
+var MC_AMBER       = '854F0B';
+
+var FH = 'Arial';    // ≈ --font-heading (titres, kickers, labels)
+var FB = 'Calibri';  // ≈ --font-body
+
+var W    = 10034;    // largeur utile A4 (11906 − 2 × marge 936 twips = 0.65")
+var GAP  = 260;      // gouttière entre colonnes de grille
+var LOGO_H = 58;     // hauteur du logo dans l'en-tête courant (px @96dpi)
+var LOGO_W = Math.round(LOGO_H * 500 / 164); // ratio natif du PNG 500×164
+
+// Saut de page avant la fiche matériel (break-before: page du design)
+var PAGEBREAK_MATERIEL = true;
+
+// ------------------------------------------------------------
+// HELPERS BAS NIVEAU
+// ------------------------------------------------------------
 function _tr(t,o){
   o=o||{};
-  t=String(t===undefined||t===null?'':t);
-  return new _D.TextRun({text:t,size:o.sz||20,color:o.c||'333333',bold:!!o.b,italics:!!o.i,font:'Calibri'});
+  return new _D.TextRun({
+    text:String(t===undefined||t===null?'':t),
+    size:o.sz||20, color:o.c||MC_INK, bold:!!o.b, italics:!!o.i,
+    font:o.f||FB, allCaps:!!o.caps, characterSpacing:o.ls||0,
+    shading:o.fill?{fill:o.fill,type:'clear',color:'auto'}:undefined
+  });
 }
 function _p(t,o){
-  o=o||{};t=t||'';
+  o=o||{}; t=(t===undefined||t===null)?'':t;
   var ch=[];
   if(typeof t==='string'){
     t.split('\n').forEach(function(line,i){
       if(i>0)ch.push(new _D.TextRun({break:1}));
-      ch.push(new _D.TextRun({text:line,size:o.sz||20,color:o.c||'333333',bold:!!o.b,italics:!!o.i,font:'Calibri'}));
+      ch.push(_tr(line,o));
     });
-  }else{ch.push(t);}
-  return new _D.Paragraph({children:ch,spacing:{before:o.pb||60,after:o.pa||60}});
-}
-function _h2(t){
+  }else if(Object.prototype.toString.call(t)==='[object Array]'){ ch=t; }
+  else { ch.push(t); }
   return new _D.Paragraph({
-    children:[new _D.TextRun({text:t,bold:true,size:24,color:'003087',font:'Calibri'})],
-    spacing:{before:200,after:80},
-    border:{bottom:{style:'single',size:6,color:'F47C20',space:2}}
+    children:ch,
+    alignment:o.al||undefined,
+    spacing:{before:o.pb===undefined?40:o.pb, after:o.pa===undefined?60:o.pa},
+    indent:o.indent||undefined,
+    keepNext:!!o.keep,
+    border:o.border||undefined
   });
 }
-var _bds={top:{style:'single',size:1,color:'D0D5DD'},bottom:{style:'single',size:1,color:'D0D5DD'},left:{style:'single',size:1,color:'D0D5DD'},right:{style:'single',size:1,color:'D0D5DD'}};
-var _nb={top:{style:'none',size:0,color:'FFFFFF'},bottom:{style:'none',size:0,color:'FFFFFF'},left:{style:'none',size:0,color:'FFFFFF'},right:{style:'none',size:0,color:'FFFFFF'}};
-function _kvp(icon,k,v){
-  return new _D.TableRow({children:[
-    new _D.TableCell({width:{size:3200,type:'dxa'},shading:{fill:'EDF1F7',type:'clear'},margins:{top:50,bottom:50,left:100,right:80},borders:_bds,
-      children:[new _D.Paragraph({children:[_tr((icon?icon+' ':'')+k,{b:true,sz:18,c:'003087'})]})]  }),
-    new _D.TableCell({width:{size:5800,type:'dxa'},margins:{top:50,bottom:50,left:100,right:80},borders:_bds,
-      children:[new _D.Paragraph({children:[_tr(v||'—',{sz:18})]})]}),
-  ]});
+function _sp(h){ return new _D.Paragraph({children:[_tr('',{sz:2})],spacing:{before:0,after:h||160}}); }
+
+function _bd(c,sz){ return {style:'single',size:sz||4,color:c||MC_RULE}; }
+function _frame(c,sz){ var b=_bd(c,sz); return {top:b,bottom:b,left:b,right:b}; }
+var _NONE={style:'none',size:0,color:'auto'};
+var _NB ={top:_NONE,bottom:_NONE,left:_NONE,right:_NONE};
+var _NBT={top:_NONE,bottom:_NONE,left:_NONE,right:_NONE,insideHorizontal:_NONE,insideVertical:_NONE};
+
+// Compteur de sections — "01 — Client", "02 — Objet", ...
+var _secN=0;
+function _resetSec(){ _secN=0; }
+function _kicker(title,opt){
+  opt=opt||{};
+  _secN++;
+  var n=(_secN<10?'0':'')+_secN;
+  return new _D.Paragraph({
+    children:[_tr(n+' — '+title,{sz:16,c:MC_ACCENT_700,b:true,f:FH,caps:true,ls:20})],
+    spacing:{before:opt.pb===undefined?0:opt.pb, after:opt.pa===undefined?80:opt.pa},
+    pageBreakBefore:!!opt.pageBreak,
+    keepNext:true
+  });
 }
-function _table2col(rows){
-  if(!rows||!rows.length)return null;
-  return new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[3200,5800],rows:rows});
-}
-function _divider(){
-  return new _D.Paragraph({children:[_tr('',{sz:4})],border:{bottom:{style:'single',size:1,color:'E0E0E0',space:1}},spacing:{before:60,after:60}});
+function _h2(t){ return _p(t,{sz:32,b:true,f:FH,c:MC_INK,pb:0,pa:120,keep:true}); }
+function _h3(t){ return _p(t,{sz:26,b:true,f:FH,c:MC_INK,pb:0,pa:100,keep:true}); }
+function _lead(t){ return _p(t,{sz:19,c:MC_MUTED,pb:0,pa:160}); }
+
+// Filet orange plein (.im-divider-strip)
+function _strip(){
+  return new _D.Paragraph({
+    children:[_tr('',{sz:2})],
+    border:{bottom:{style:'single',size:18,color:MC_ORANGE,space:2}},
+    spacing:{before:180,after:220}
+  });
 }
 
-// ---- Icônes par champ ----
-var _fieldIcons={'Marque':'🏷️','Modèle':'🔩','N° de série':'🆔','Capacité (kg)':'⚖️','Motorisation':'⚡','Mât (triplex/duplex/simple)':'📐','Levée (mm)':'📏','Hauteur hors tout (mm)':'📐','Fourches (L×l×e)':'🔧','Centre de gravité (mm)':'📍','Batterie (V/Ah)':'🔋','Chargeur':'🔌','Année':'📅','Heures compteur':'⏱️','État':'✅'};
-var _catLabels={chariot:'CHARIOT ÉLÉVATEUR',transpalette:'TRANSPALETTE',gerbeur:'GERBEUR / TABLE ÉLÉVATRICE',nacelle:'NACELLE',mini_pelle:'MINI PELLE',banderoleuse:'BANDEROLEUSE',accessoire:'ACCESSOIRE / ÉQUIPEMENT'};
+// Étiquette + valeur (.im-field-label / .im-field-value)
+function _label(t){ return _p(t,{sz:14,c:MC_MUTED,f:FH,caps:true,ls:16,pb:0,pa:10,keep:true}); }
+function _value(t){ return _p(t||'—',{sz:22,c:MC_INK,pb:0,pa:110}); }
 
-// ============================================================
-// SECTION 1 — En-tête commercial
-// ============================================================
-function _buildHeader(d){
+// Cadre "blueprint" — cellule unique encadrée (les repères d'angle CSS
+// n'existent pas en Word : rendus par un filet fin continu)
+function _box(children,o){
+  o=o||{};
+  var w=o.w||W;
+  return new _D.Table({
+    width:{size:w,type:'dxa'}, columnWidths:[w], layout:'fixed', borders:_NBT,
+    rows:[new _D.TableRow({cantSplit:!o.split,children:[new _D.TableCell({
+      width:{size:w,type:'dxa'},
+      borders:_frame(o.color||MC_RULE,o.bw||4),
+      shading:o.fill?{fill:o.fill,type:'clear',color:'auto'}:undefined,
+      margins:{top:o.pt||170,bottom:o.pbm||170,left:o.pl||240,right:o.pr||240},
+      children:children
+    })]})]
+  });
+}
+
+// Grille de N colonnes de champs label/valeur
+function _fieldGrid(items,cols,totalW){
+  cols=cols||2; totalW=totalW||W;
+  var cw=Math.floor(totalW/cols), widths=[], i, j;
+  for(i=0;i<cols;i++)widths.push(cw);
   var rows=[];
-  // Logo PNG (fond blanc)
-  var logoCell;
-  try{
-    var logoBytes=dataUrlToUint8('data:image/png;base64,'+LOGO_B64_PNG);
-    if(logoBytes){
-      logoCell=new _D.TableCell({width:{size:5000,type:'dxa'},borders:_nb,margins:{top:40,bottom:40,left:0,right:80},children:[
-        new _D.Paragraph({children:[new _D.ImageRun({data:logoBytes,transformation:{width:220,height:72},type:'png'})]}),
-        new _D.Paragraph({children:[_tr(d.com.n||'',{sz:15,c:'555555'})]}),
-        new _D.Paragraph({children:[_tr((d.com.t||'')+(d.com.e?' | '+d.com.e:''),{sz:13,c:'888888'})]}),
-      ]});
+  for(i=0;i<items.length;i+=cols){
+    var cells=[];
+    for(j=0;j<cols;j++){
+      var it=items[i+j];
+      cells.push(new _D.TableCell({
+        width:{size:cw,type:'dxa'}, borders:_NB,
+        margins:{top:50,bottom:50,left:0,right:(j===cols-1?0:GAP)},
+        children: it ? [_label(it[0]),_value(it[1])] : [_p('',{sz:2,pb:0,pa:0})]
+      }));
     }
-  }catch(e){}
-  if(!logoCell){
-    logoCell=new _D.TableCell({width:{size:5000,type:'dxa'},borders:_nb,margins:{top:60,bottom:60,left:0,right:80},children:[
-      new _D.Paragraph({children:[_tr('MULTI-CHARIOTS.fr',{b:true,sz:22,c:'003087'})]}),
-      new _D.Paragraph({children:[_tr(d.com.n||'',{sz:17,c:'555555'})]}),
-      new _D.Paragraph({children:[_tr((d.com.t||'')+(d.com.e?' | '+d.com.e:''),{sz:15,c:'888888'})]}),
-    ]});
+    rows.push(new _D.TableRow({cantSplit:true,children:cells}));
   }
-  rows.push(new _D.TableRow({children:[
-    logoCell,
-    new _D.TableCell({width:{size:4000,type:'dxa'},borders:_nb,margins:{top:60,bottom:60,left:80,right:0},verticalAlign:'center',children:[
-      new _D.Paragraph({alignment:'right',children:[_tr('Offre N° '+(d.off.n||'—'),{b:true,sz:22,c:'003087'})]}),
-      new _D.Paragraph({alignment:'right',children:[_tr('Le '+(d.off.d?new Date(d.off.d+'T12:00:00').toLocaleDateString('fr-FR'):new Date().toLocaleDateString('fr-FR')),{sz:16,c:'888888'})]}),
-      new _D.Paragraph({alignment:'right',children:[_tr('Validité : '+(d.liv&&d.liv.val?d.liv.val:'10 jours'),{sz:14,c:'888888'})]}),
-    ]}),
-  ]}));
-  return [
-    new _D.Paragraph({alignment:'center',children:[_tr('PROPOSITION COMMERCIALE',{b:true,sz:30,c:'003087'})],spacing:{before:0,after:60}}),
-    new _D.Paragraph({children:[_tr('',{sz:4})],border:{bottom:{style:'single',size:10,color:'F47C20',space:3}},spacing:{before:0,after:120}}),
-    new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[5000,4000],rows:rows}),
-    new _D.Paragraph({children:[_tr('',{sz:4})],border:{bottom:{style:'single',size:1,color:'E8EEF8',space:1}},spacing:{before:80,after:120}}),
-  ];
+  return new _D.Table({width:{size:totalW,type:'dxa'},columnWidths:widths,layout:'fixed',borders:_NBT,rows:rows});
+}
+
+// Ligne à coche (.im-check) : marqueur + libellé gras optionnel + reste
+function _checkPar(item,mark,markColor,noRule){
+  var b='', rest='';
+  if(typeof item==='string'){
+    var m=item.split(/\s+—\s+/);
+    if(m.length>1){ b=m[0]; rest=' — '+m.slice(1).join(' — '); }
+    else { var c=item.split(/\s*:\s+/); if(c.length>1){ b=c[0]; rest=' : '+c.slice(1).join(' : '); } else rest=item; }
+  }else{ b=item.b||''; rest=item.t||''; }
+  var ch=[_tr(mark+' ',{sz:20,c:markColor,b:true,f:FH})];
+  if(b) ch.push(_tr(b,{sz:19,b:true}));
+  if(rest) ch.push(_tr(rest,{sz:19}));
+  return new _D.Paragraph({
+    children:ch,
+    spacing:{before:60,after:60},
+    border: noRule?undefined:{bottom:{style:'single',size:2,color:MC_HAIRLINE,space:2}}
+  });
+}
+
+// Liste à coches sur N colonnes
+function _checkGrid(items,o){
+  o=o||{};
+  var cols=o.cols||2, totalW=o.w||W;
+  var mark=o.mark||'+', mc=o.markColor||MC_ORANGE;
+  var cw=Math.floor(totalW/cols), widths=[], i, j;
+  for(i=0;i<cols;i++)widths.push(cw);
+  var rows=[];
+  for(i=0;i<items.length;i+=cols){
+    var cells=[];
+    for(j=0;j<cols;j++){
+      var it=items[i+j];
+      var last=(i+j)>=items.length-cols;
+      cells.push(new _D.TableCell({
+        width:{size:cw,type:'dxa'}, borders:_NB,
+        margins:{top:0,bottom:0,left:0,right:(j===cols-1?0:GAP)},
+        children: it ? [_checkPar(it,mark,mc,last&&!o.rules)] : [_p('',{sz:2,pb:0,pa:0})]
+      }));
+    }
+    rows.push(new _D.TableRow({cantSplit:true,children:cells}));
+  }
+  return new _D.Table({width:{size:totalW,type:'dxa'},columnWidths:widths,layout:'fixed',borders:_NBT,rows:rows});
+}
+
+// Rangée de blocs côte à côte (cadres séparés par une gouttière vide)
+function _boxRow(boxes){
+  var n=boxes.length;
+  var gutter=GAP;
+  var cw=Math.floor((W-gutter*(n-1))/n);
+  var widths=[], cells=[];
+  boxes.forEach(function(b,i){
+    if(i>0){ widths.push(gutter); cells.push(new _D.TableCell({width:{size:gutter,type:'dxa'},borders:_NB,children:[_p('',{sz:2,pb:0,pa:0})]})); }
+    widths.push(cw);
+    cells.push(new _D.TableCell({
+      width:{size:cw,type:'dxa'},
+      borders:_frame(MC_RULE,4),
+      margins:{top:160,bottom:160,left:200,right:200},
+      children:b.children,
+      verticalAlign:b.va||'top'
+    }));
+  });
+  return new _D.Table({width:{size:W,type:'dxa'},columnWidths:widths,layout:'fixed',borders:_NBT,
+    rows:[new _D.TableRow({cantSplit:true,height:boxes[0].minH?{value:boxes[0].minH,rule:'atLeast'}:undefined,children:cells})]});
+}
+
+// Tag (.tag)
+function _tags(list){
+  var ch=[];
+  list.forEach(function(t,i){
+    if(!t||!t.txt)return;
+    if(ch.length)ch.push(_tr('  ',{sz:16}));
+    ch.push(_tr('  '+t.txt.toUpperCase()+'  ',{sz:15,b:true,f:FH,ls:16,
+      c:t.accent?MC_ORANGE_INK:MC_ACCENT_700, fill:t.accent?MC_ORANGE_SOFT:MC_BG}));
+  });
+  if(!ch.length)return null;
+  return new _D.Paragraph({children:ch,spacing:{before:0,after:140}});
+}
+
+var _catLabels={chariot:'Chariot élévateur',transpalette:'Transpalette',gerbeur:'Gerbeur / table élévatrice',nacelle:'Nacelle',mini_pelle:'Mini pelle',banderoleuse:'Banderoleuse',accessoire:'Accessoire / équipement'};
+
+function _euro(v){
+  var n=parseFloat(v)||0;
+  return Math.abs(n%1)<0.005
+    ? Math.round(n).toLocaleString('fr-FR')
+    : n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function _dateFR(s){ return s?new Date(s+'T12:00:00').toLocaleDateString('fr-FR'):new Date().toLocaleDateString('fr-FR'); }
+
+// ============================================================
+// BANDEAU TITRE — fond orange pleine largeur
+// ============================================================
+function _bannerTitle(d){
+  var contact=[d.com.n,d.com.t,d.com.e].filter(Boolean).join(' · ');
+  var sh={fill:MC_ORANGE,type:'clear',color:'auto'};
+  var CW=[6800,1600,1634];
+  var left=new _D.TableCell({width:{size:CW[0],type:'dxa'},borders:_NB,shading:sh,verticalAlign:'bottom',
+    margins:{top:240,bottom:240,left:280,right:80},children:[
+      _p('Offre N° '+(d.off.n||'—'),{sz:16,c:MC_ORANGE_PALE,f:FH,b:true,caps:true,ls:20,pb:0,pa:60}),
+      _p('Proposition commerciale',{sz:48,c:MC_WHITE,f:FH,b:true,pb:0,pa:60}),
+      _p(contact,{sz:19,c:MC_ORANGE_PALE,pb:0,pa:0})
+    ]});
+  function rightCell(lbl,val,w,padRight){
+    return new _D.TableCell({width:{size:w,type:'dxa'},borders:_NB,shading:sh,verticalAlign:'bottom',
+      margins:{top:240,bottom:240,left:80,right:padRight?280:80},children:[
+        _p(lbl,{sz:14,c:MC_ORANGE_PALE,f:FH,caps:true,ls:16,al:'right',pb:0,pa:10}),
+        _p(val,{sz:22,c:MC_WHITE,b:true,al:'right',pb:0,pa:0})
+      ]});
+  }
+  return new _D.Table({width:{size:W,type:'dxa'},columnWidths:CW,layout:'fixed',borders:_NBT,
+    rows:[new _D.TableRow({cantSplit:true,children:[
+      left,
+      rightCell('Date',_dateFR(d.off.d),CW[1],false),
+      rightCell('Validité',(d.liv&&d.liv.val)||'10 jours',CW[2],true)
+    ]})]});
 }
 
 // ============================================================
-// SECTION 2 — Client
+// 01 — CLIENT
 // ============================================================
-function _buildClient(d){
-  var rows=[];
-  if(d.cl.s)rows.push(_kvp('🏷️','Société',d.cl.s));
-  if(d.cl.c)rows.push(_kvp('👤','Interlocuteur',d.cl.c));
-  if(d.cl.a)rows.push(_kvp('📍','Adresse',d.cl.a));
-  if(d.cl.t)rows.push(_kvp('📞','Téléphone',d.cl.t));
-  if(d.cl.e)rows.push(_kvp('✉️','Email',d.cl.e));
-  var out=[_h2('CLIENT')];
-  if(rows.length)out.push(_table2col(rows));
+function _secClient(d){
+  var items=[];
+  if(d.cl.s)items.push(['Société',d.cl.s]);
+  if(d.cl.c)items.push(['Interlocuteur',d.cl.c]);
+  if(d.cl.a)items.push(['Adresse',d.cl.a]);
+  if(d.cl.t)items.push(['Téléphone',d.cl.t]);
+  if(d.cl.e)items.push(['Email',d.cl.e]);
+  if(!items.length)items.push(['Société','—']);
+  var inner=[_kicker('Client')];
+  inner.push(_fieldGrid(items,2,W-480));
+  return [_box(inner),_sp(200)];
+}
+
+// ============================================================
+// 02 — OBJET
+// ============================================================
+function _secObjet(d){
+  var out=[_kicker('Objet'),_h2('Objet de notre proposition')];
+  var txt=d.intro||'Madame, Monsieur,\nNous avons le plaisir de vous adresser notre proposition commerciale relative à la fourniture d\'un matériel pour les besoins de votre entreprise.';
+  txt.split('\n').forEach(function(line){ if(line.trim())out.push(_p(line.trim(),{sz:20,pb:40,pa:100})); });
+  out.push(_strip());
   return out;
 }
 
 // ============================================================
-// SECTION 3 — Introduction
+// 03 — FICHE MATÉRIEL (grille 3 colonnes)
 // ============================================================
-function _buildIntro(d){
-  if(!d.intro)return[];
-  return[_h2('OBJET DE NOTRE PROPOSITION'),_p(d.intro)];
-}
+function _secMateriel(d){
+  var catLabel=_catLabels[d.cat||'chariot']||(d.cat||'Matériel');
+  var out=[_kicker('Matériel',{pageBreak:PAGEBREAK_MATERIEL}),_h2('Fiche matériel — '+catLabel)];
+  var inner=[];
+  var tg=_tags([{txt:(d.cd&&d.cd['État'])||'',accent:true},{txt:(d.cd&&d.cd['Motorisation'])||''}]);
+  if(tg)inner.push(tg);
+  if(d.ref_interne)inner.push(_fieldGrid([['Référence interne',d.ref_interne]],1,W-480));
 
-// ============================================================
-// SECTION 4 — Fiche matériel
-// ============================================================
-function _buildFiche(d){
-  var cat=d.cat||'chariot';
-  var catLabel=_catLabels[cat]||cat.toUpperCase();
-  var rows=[];
-  if(d.ref_interne)rows.push(_kvp('🗂️','Référence interne',d.ref_interne));
-  if(d.stockmanProduct&&d.stockmanProduct.caracteristiques){
-    // Fiche technique Stockman complète
-    var carac=d.stockmanProduct.caracteristiques;
+  var sp=d.stockmanProduct&&d.stockmanProduct.caracteristiques;
+  if(sp){
+    var carac=d.stockmanProduct.caracteristiques, used={};
     var groups=[
-      {title:'Dimensions & capacité',test:function(k){var kl=k.toLowerCase();return kl.includes('capacit')||kl.includes('charge')&&!kl.includes('chargeur')||kl.includes('levée')||kl.includes('longueur')||kl.includes('largeur')||kl.includes('hauteur')||kl.includes('fourche')||kl.includes('garde');}},
-      {title:'Performances',test:function(k){var kl=k.toLowerCase();return kl.includes('vitesse')||kl.includes('pente')||kl.includes('frein')||kl.includes('sonore')||kl.includes('rayon')||kl.includes('allée');}},
-      {title:'Batterie & motorisation',test:function(k){var kl=k.toLowerCase();return kl.includes('batterie')||kl.includes('tension')||kl.includes('moteur')||kl.includes('chargeur')||kl.includes('autonomie');}},
-      {title:'Roues & structure',test:function(k){var kl=k.toLowerCase();return kl.includes('roue')||kl.includes('matière')||kl.includes('galet')||kl.includes('poids');}},
+      {title:'Dimensions & capacité',test:function(k){var kl=k.toLowerCase();return kl.indexOf('capacit')>=0||(kl.indexOf('charge')>=0&&kl.indexOf('chargeur')<0)||kl.indexOf('levée')>=0||kl.indexOf('longueur')>=0||kl.indexOf('largeur')>=0||kl.indexOf('hauteur')>=0||kl.indexOf('fourche')>=0||kl.indexOf('garde')>=0;}},
+      {title:'Performances',test:function(k){var kl=k.toLowerCase();return kl.indexOf('vitesse')>=0||kl.indexOf('pente')>=0||kl.indexOf('frein')>=0||kl.indexOf('sonore')>=0||kl.indexOf('rayon')>=0||kl.indexOf('allée')>=0;}},
+      {title:'Batterie & motorisation',test:function(k){var kl=k.toLowerCase();return kl.indexOf('batterie')>=0||kl.indexOf('tension')>=0||kl.indexOf('moteur')>=0||kl.indexOf('chargeur')>=0||kl.indexOf('autonomie')>=0;}},
+      {title:'Roues & structure',test:function(k){var kl=k.toLowerCase();return kl.indexOf('roue')>=0||kl.indexOf('matière')>=0||kl.indexOf('galet')>=0||kl.indexOf('poids')>=0;}}
     ];
-    var used={};
     groups.forEach(function(g){
-      var gRows=[];
-      Object.keys(carac).forEach(function(k){if(!used[k]&&g.test(k)){gRows.push(_kvp('▸',k.split(' (')[0],carac[k]));used[k]=true;}});
-      if(gRows.length){
-        rows.push(new _D.TableRow({children:[new _D.TableCell({width:{size:9000,type:'dxa'},columnSpan:2,shading:{fill:'F0F4FF',type:'clear'},margins:{top:40,bottom:40,left:100,right:80},borders:_bds,children:[new _D.Paragraph({children:[_tr(g.title,{b:true,sz:17,c:'003087'})]})]}  )]}));
-        gRows.forEach(function(r){rows.push(r);});
+      var it=[];
+      Object.keys(carac).forEach(function(k){ if(!used[k]&&g.test(k)){ it.push([k.split(' (')[0],carac[k]]); used[k]=true; } });
+      if(it.length){
+        inner.push(_p(g.title,{sz:15,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18,pb:120,pa:70,keep:true}));
+        inner.push(_fieldGrid(it,3,W-480));
       }
     });
-    Object.keys(carac).forEach(function(k){if(!used[k])rows.push(_kvp('▸',k.split(' (')[0],carac[k]));});
+    var rest=[];
+    Object.keys(carac).forEach(function(k){ if(!used[k])rest.push([k.split(' (')[0],carac[k]]); });
+    if(rest.length){
+      inner.push(_p('Autres caractéristiques',{sz:15,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18,pb:120,pa:70,keep:true}));
+      inner.push(_fieldGrid(rest,3,W-480));
+    }
   }else{
-    // Champs manuels
-    Object.entries(d.cd||{}).forEach(function(e){rows.push(_kvp(_fieldIcons[e[0]]||'▸',e[0],e[1]));});
+    var items=[];
+    Object.keys(d.cd||{}).forEach(function(k){ if(d.cd[k])items.push([k.split(' (')[0],d.cd[k]]); });
+    if(items.length)inner.push(_fieldGrid(items,3,W-480));
+    else inner.push(_p('Caractéristiques communiquées sur demande.',{sz:19,c:MC_MUTED}));
   }
-  var out=[_h2('FICHE MATÉRIEL — '+catLabel)];
-  if(rows.length)out.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[3200,5800],rows:rows}));
+  out.push(_box(inner,{split:true}));
+  out.push(_sp(220));
   return out;
 }
 
 // ============================================================
-// SECTION 5 — Options
+// 04 — PHOTOS (grille adaptative, images embarquées)
 // ============================================================
-function _buildOptions(d){
-  // Copie pour ne pas muter d.opts
-  var opts=(d.opts||[]).slice();
-  if(d.customOpts)d.customOpts.split('\n').forEach(function(o){if(o.trim())opts.push(o.trim());});
-  // Dédoublonner
-  var seen={};
-  opts=opts.filter(function(o){if(seen[o])return false;seen[o]=true;return true;});
-  if(!opts.length)return[];
-  var out=[_h2('OPTIONS & ÉQUIPEMENTS')];
-  opts.forEach(function(o){out.push(_p('  ✓  '+o,{pb:15,pa:15}));});
-  return out;
-}
-
-// ============================================================
-// SECTION 6 — Photos
-// ============================================================
-function _buildPhotos(photos){
+function _secPhotos(photos){
   return new Promise(function(resolve){
     var valid=(photos||[]).filter(function(p){return p&&p.d&&typeof p.d==='string'&&p.d.indexOf(',')>=0;});
     if(!valid.length){resolve([]);return;}
-    var loaded=0;
-    var imgData=[];
+    var loaded=0, imgData=[];
     valid.forEach(function(ph,idx){
       try{
         var bytes=dataUrlToUint8(ph.d);
-        if(!bytes){loaded++;if(loaded===valid.length)done();return;}
-        var mime=ph.d.split(';')[0].split(':')[1]||'image/jpeg';
-        var ext=mime==='image/png'?'png':mime==='image/gif'?'gif':'jpg';
+        if(!bytes){ tick(); return; }
         var img=new Image();
-        img.onload=function(){
-          var w=img.naturalWidth||800,h=img.naturalHeight||600;
-          var maxW=320,maxH=220;
-          var ratio=Math.min(maxW/w,maxH/h,1);
-          imgData[idx]={bytes:bytes,ext:ext,w:Math.round(w*ratio),h:Math.round(h*ratio)};
-          loaded++;if(loaded===valid.length)done();
-        };
-        img.onerror=function(){loaded++;if(loaded===valid.length)done();};
+        img.onload=function(){ imgData[idx]={bytes:bytes,nw:img.naturalWidth||800,nh:img.naturalHeight||600}; tick(); };
+        img.onerror=function(){ tick(); };
         img.src=ph.d;
-      }catch(e){loaded++;if(loaded===valid.length)done();}
+      }catch(e){ tick(); }
     });
+    function tick(){ loaded++; if(loaded===valid.length)done(); }
     function done(){
       var imgs=imgData.filter(Boolean);
       if(!imgs.length){resolve([]);return;}
-      var out=[_h2('PHOTOS')];
-      for(var i=0;i<imgs.length;i+=2){
+      var cols=imgs.length===1?1:(imgs.length===2?2:3);
+      var cellPx=cols===1?300:(cols===2?250:200);   // largeur cible (px @96dpi)
+      var out=[_kicker('Photos'),_h3('Le matériel en images')];
+      // 1 px @96dpi = 15 twips ; la grille ne s'étale pas au-delà du besoin
+      var cw=Math.min(Math.floor(W/cols), cellPx*15+200), tw=cw*cols, widths=[], i, j;
+      for(i=0;i<cols;i++)widths.push(cw);
+      var rows=[];
+      for(i=0;i<imgs.length;i+=cols){
         var cells=[];
-        [imgs[i],imgs[i+1]].forEach(function(img){
-          if(!img){cells.push(new _D.TableCell({width:{size:4500,type:'dxa'},borders:_nb,children:[_p('')]}));return;}
+        for(j=0;j<cols;j++){
+          var im=imgs[i+j];
+          if(!im){ cells.push(new _D.TableCell({width:{size:cw,type:'dxa'},borders:_NB,children:[_p('',{sz:2,pb:0,pa:0})]})); continue; }
+          var r=Math.min(cellPx/im.nw, (cellPx*0.75)/im.nh, 1);
+          var pw=Math.max(40,Math.round(im.nw*r)), phh=Math.max(30,Math.round(im.nh*r));
+          var cellChildren;
           try{
-            cells.push(new _D.TableCell({width:{size:4500,type:'dxa'},borders:_nb,margins:{top:40,bottom:40,left:40,right:40},children:[
-              new _D.Paragraph({alignment:'center',children:[new _D.ImageRun({data:img.bytes,transformation:{width:img.w,height:img.h},type:img.ext})]}),
-            ]}));
-          }catch(e){cells.push(new _D.TableCell({width:{size:4500,type:'dxa'},borders:_nb,children:[_p('')]}));}
-        });
-        if(cells.length===1)cells.push(new _D.TableCell({width:{size:4500,type:'dxa'},borders:_nb,children:[_p('')]}));
-        out.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[4500,4500],rows:[new _D.TableRow({children:cells})]}));
+            cellChildren=[new _D.Paragraph({alignment:'center',spacing:{before:60,after:60},
+              children:[new _D.ImageRun({data:im.bytes,transformation:{width:pw,height:phh}})]})];
+          }catch(e){ cellChildren=[_p('',{sz:2,pb:0,pa:0})]; }
+          cells.push(new _D.TableCell({
+            width:{size:cw,type:'dxa'}, borders:_frame(MC_RULE,4), verticalAlign:'center',
+            margins:{top:100,bottom:100,left:100,right:100}, children:cellChildren
+          }));
+        }
+        rows.push(new _D.TableRow({cantSplit:true,children:cells}));
       }
+      out.push(new _D.Table({width:{size:tw,type:'dxa'},columnWidths:widths,layout:'fixed',borders:_NBT,rows:rows}));
+      out.push(_sp(220));
       resolve(out);
     }
   });
 }
 
 // ============================================================
-// SECTION 7 — Garanties
+// 05 — ÉQUIPEMENTS (liste à coches 2 colonnes, marqueur orange)
 // ============================================================
-function _buildGaranties(d){
-  var garanties=d.garanties||[];
-  if(!garanties.length)return[];
-  var out=[_h2('GARANTIES ET DOCUMENTS LIVRÉS')];
-  // Coches sans icône, liste propre
-  garanties.forEach(function(g){
-    out.push(new _D.Paragraph({
-      children:[_tr('✓   '+g,{sz:19})],
-      spacing:{before:60,after:60},
-      indent:{left:200}
-    }));
-  });
-  // VGP PAS affiché ici (visible dans la section LLD uniquement)
-  return out;
+function _secEquipements(d){
+  var opts=(d.opts||[]).slice();
+  if(d.customOpts)d.customOpts.split('\n').forEach(function(o){ if(o.trim())opts.push(o.trim()); });
+  var seen={};
+  opts=opts.filter(function(o){ if(seen[o])return false; seen[o]=true; return true; });
+  if(!opts.length)return [];
+  return [_kicker('Équipements'),_h3('Caractéristiques & équipements'),
+          _checkGrid(opts,{cols:2,mark:'+',markColor:MC_ORANGE}),_sp(220)];
 }
 
 // ============================================================
-// SECTION 8 — Prix (Investissement)
+// 06 — GARANTIES
 // ============================================================
-function _buildPrix(d){
+function _secGaranties(d){
+  var g=d.garanties||[];
+  if(!g.length)return [];
+  var inner=[_kicker('Garanties et documents livrés')];
+  g.forEach(function(item,i){ inner.push(_checkPar(item,'✓',MC_ACCENT,true)); });
+  return [_box(inner),_sp(220)];
+}
+
+// ============================================================
+// 07 — VALEUR D'INVESTISSEMENT
+// ============================================================
+function _secPrix(d){
   var f=d.f||'invest';
-  if(f!=='invest'&&f!=='both'&&f!=='carsat')return[];
+  if(f!=='invest'&&f!=='both'&&f!=='carsat')return [];
   var prix=d.prix||[];
-  var out=[_h2(f==='carsat'?'INVESTISSEMENT — DISPOSITIF CARSAT FIPU':'VALEUR D’INVESTISSEMENT')];
+  var out=[_kicker(f==='carsat'?'Investissement — dispositif CARSAT FIPU':'Valeur d\'investissement'),_h3('Détail de l\'offre')];
 
-  // ---- Tableau principal ----
-  // Colonnes : DÉSIGNATION (6200) | QTÉ (800) | PRIX HT (2000)
-  var CW=[6200,800,2000];
+  var CW=[6634,900,2500];
   var rows=[];
-
-  // En-tête
-  rows.push(new _D.TableRow({children:[
-    new _D.TableCell({width:{size:CW[0],type:'dxa'},shading:{fill:'003087',type:'clear'},margins:{top:60,bottom:60,left:120,right:60},borders:_bds,
-      children:[new _D.Paragraph({children:[_tr('DÉSIGNATION',{b:true,sz:18,c:'FFFFFF'})]})]  }),
-    new _D.TableCell({width:{size:CW[1],type:'dxa'},shading:{fill:'003087',type:'clear'},margins:{top:60,bottom:60,left:40,right:40},borders:_bds,
-      children:[new _D.Paragraph({alignment:'center',children:[_tr('QTÉ',{b:true,sz:18,c:'FFFFFF'})]})]}),
-    new _D.TableCell({width:{size:CW[2],type:'dxa'},shading:{fill:'003087',type:'clear'},margins:{top:60,bottom:60,left:60,right:120},borders:_bds,
-      children:[new _D.Paragraph({alignment:'right',children:[_tr('PRIX HT',{b:true,sz:18,c:'FFFFFF'})]})]  }),
+  function hCell(txt,w,al,padL,padR){
+    return new _D.TableCell({width:{size:w,type:'dxa'},
+      borders:{top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_ACCENT,8)},
+      margins:{top:60,bottom:90,left:padL,right:padR},
+      children:[_p(txt,{sz:14,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18,al:al,pb:0,pa:0})]});
+  }
+  rows.push(new _D.TableRow({tableHeader:true,cantSplit:true,children:[
+    hCell('Désignation',CW[0],undefined,0,60),
+    hCell('Qté',CW[1],'center',40,40),
+    hCell('Prix HT',CW[2],'right',60,0)
   ]}));
 
-  // Lignes produits
   var total=0;
-  prix.forEach(function(r,i){
-    var v=parseFloat(r.v)||0;
-    var q=parseInt(r.q)||1;
+  prix.forEach(function(r){
+    var v=parseFloat(r.v)||0, q=parseInt(r.q)||1;
     total+=v*q;
-    var bg=i%2===0?'FFFFFF':'F5F7FB';
-    rows.push(new _D.TableRow({children:[
-      new _D.TableCell({width:{size:CW[0],type:'dxa'},borders:_bds,margins:{top:60,bottom:60,left:120,right:60},shading:{fill:bg,type:'clear'},
-        children:[new _D.Paragraph({children:[_tr(r.d||'',{sz:18,b:i===0})]})]  }),
-      new _D.TableCell({width:{size:CW[1],type:'dxa'},borders:_bds,margins:{top:60,bottom:60,left:40,right:40},shading:{fill:bg,type:'clear'},
-        children:[new _D.Paragraph({alignment:'center',children:[_tr(String(q),{sz:18})]})]}),
-      new _D.TableCell({width:{size:CW[2],type:'dxa'},borders:_bds,margins:{top:60,bottom:60,left:60,right:120},shading:{fill:bg,type:'clear'},
-        children:[new _D.Paragraph({alignment:'right',children:[_tr(v?v.toLocaleString('fr-FR')+' € HT':'—',{sz:18})]})]}),
+    var rb={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_HAIRLINE,2)};
+    rows.push(new _D.TableRow({cantSplit:true,children:[
+      new _D.TableCell({width:{size:CW[0],type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:0,right:60},
+        children:[_p(r.d||'',{sz:20,pb:0,pa:0})]}),
+      new _D.TableCell({width:{size:CW[1],type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:40,right:40},
+        children:[_p(String(q),{sz:20,al:'center',pb:0,pa:0})]}),
+      new _D.TableCell({width:{size:CW[2],type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:60,right:0},
+        children:[_p(v?_euro(v)+' € HT':'—',{sz:20,al:'right',pb:0,pa:0})]})
     ]}));
   });
 
-  // Remise
-  var remisePct=d.remise_pct||0,remiseFix=d.remise_fix||0;
+  var remisePct=d.remise_pct||0, remiseFix=d.remise_fix||0;
   var remiseMontant=remisePct?Math.round(total*remisePct/100):remiseFix;
   if(remiseMontant>0){
     total-=remiseMontant;
-    rows.push(new _D.TableRow({children:[
-      new _D.TableCell({width:{size:CW[0],type:'dxa'},borders:_bds,margins:{top:55,bottom:55,left:120,right:60},
-        children:[new _D.Paragraph({children:[_tr('Remise commerciale'+(remisePct?' ('+remisePct+' %)':''),{sz:17,i:true,c:'1a7a4a'})]})]  }),
-      new _D.TableCell({width:{size:CW[1],type:'dxa'},borders:_bds,margins:{top:55,bottom:55,left:40,right:40},
-        children:[_p('')]}),
-      new _D.TableCell({width:{size:CW[2],type:'dxa'},borders:_bds,margins:{top:55,bottom:55,left:60,right:120},
-        children:[new _D.Paragraph({alignment:'right',children:[_tr('− '+remiseMontant.toLocaleString('fr-FR')+' € HT',{sz:17,b:true,c:'1a7a4a'})]})]  }),
+    var rb2={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_HAIRLINE,2)};
+    rows.push(new _D.TableRow({cantSplit:true,children:[
+      new _D.TableCell({width:{size:CW[0],type:'dxa'},borders:rb2,margins:{top:90,bottom:90,left:0,right:60},
+        children:[_p('Remise commerciale'+(remisePct?' ('+remisePct+' %)':''),{sz:19,i:true,c:MC_GREEN,pb:0,pa:0})]}),
+      new _D.TableCell({width:{size:CW[1],type:'dxa'},borders:rb2,children:[_p('',{sz:2,pb:0,pa:0})]}),
+      new _D.TableCell({width:{size:CW[2],type:'dxa'},borders:rb2,margins:{top:90,bottom:90,left:60,right:0},
+        children:[_p('− '+_euro(remiseMontant)+' € HT',{sz:19,b:true,c:MC_GREEN,al:'right',pb:0,pa:0})]})
     ]}));
   }
 
-  // Ligne TOTAL HT — 3 cellules alignées sur CW
-  rows.push(new _D.TableRow({children:[
-    new _D.TableCell({width:{size:CW[0],type:'dxa'},shading:{fill:'EDF1F7',type:'clear'},margins:{top:80,bottom:80,left:120,right:60},borders:_bds,
-      children:[new _D.Paragraph({children:[_tr('TOTAL HT',{b:true,sz:21,c:'003087'})]})]  }),
-    new _D.TableCell({width:{size:CW[1],type:'dxa'},shading:{fill:'EDF1F7',type:'clear'},margins:{top:80,bottom:80,left:40,right:40},borders:_bds,
-      children:[_p('')]}),
-    new _D.TableCell({width:{size:CW[2],type:'dxa'},shading:{fill:'003087',type:'clear'},margins:{top:80,bottom:80,left:60,right:120},borders:_bds,
-      children:[new _D.Paragraph({alignment:'right',children:[_tr(total.toLocaleString('fr-FR')+' € HT',{b:true,sz:21,c:'FFFFFF'})]})]  }),
+  // Ligne TOTAL HT — filet accent 2px, montant orange XXL
+  var tb={top:_bd(MC_ACCENT,12),left:_NONE,right:_NONE,bottom:_NONE};
+  rows.push(new _D.TableRow({cantSplit:true,children:[
+    new _D.TableCell({width:{size:CW[0]+CW[1],type:'dxa'},columnSpan:2,borders:tb,verticalAlign:'bottom',
+      margins:{top:160,bottom:60,left:0,right:60},children:[
+        new _D.Paragraph({spacing:{before:0,after:0},children:[
+          _tr('Total HT',{sz:21,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18}),
+          _tr('   TVA non incluse',{sz:15,c:MC_MUTED,i:true})
+        ]})]}),
+    new _D.TableCell({width:{size:CW[2],type:'dxa'},borders:tb,verticalAlign:'bottom',
+      margins:{top:130,bottom:40,left:60,right:0},children:[
+        _p(_euro(total)+' €',{sz:50,c:MC_ORANGE,b:true,f:FH,al:'right',pb:0,pa:0})]})
   ]}));
 
-  out.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:CW,rows:rows}));
+  out.push(_box([new _D.Table({width:{size:W-480,type:'dxa'},columnWidths:CW,layout:'fixed',borders:_NBT,rows:rows})],{split:true}));
 
   // ---- CARSAT FIPU ----
   if(f==='carsat'&&total>0){
@@ -1651,479 +1827,353 @@ function _buildPrix(d){
     var subvEff=Math.min(subvBrute,PLAFOND);
     var reste=total-subvEff;
     var plafAtteint=subvBrute>PLAFOND;
-    out.push(_p(''));
-    out.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[7000,2000],rows:[
-      new _D.TableRow({children:[
-        new _D.TableCell({width:{size:7000,type:'dxa'},shading:{fill:'E8F5E9',type:'clear'},margins:{top:65,bottom:65,left:120,right:60},borders:_bds,
-          children:[new _D.Paragraph({children:[
-            _tr('Subvention FIPU 70 %',{sz:18,c:'1a7a4a',b:true}),
-            _tr(plafAtteint
-              ?' — plafond 25 000 € HT atteint'
-              :' — subvention accordée sur montant total',
-            {sz:14,c:'1a7a4a',i:true}),
-          ]})]  }),
-        new _D.TableCell({width:{size:2000,type:'dxa'},shading:{fill:'1a7a4a',type:'clear'},margins:{top:65,bottom:65,left:60,right:120},borders:_bds,
-          children:[new _D.Paragraph({alignment:'right',children:[_tr('− '+subvEff.toLocaleString('fr-FR')+' € HT',{b:true,sz:20,c:'FFFFFF'})]})]  }),
-      ]}),
-      new _D.TableRow({children:[
-        new _D.TableCell({width:{size:7000,type:'dxa'},shading:{fill:'EDF1F7',type:'clear'},margins:{top:65,bottom:65,left:120,right:60},borders:_bds,
-          children:[new _D.Paragraph({children:[_tr('RESTE À CHARGE HT',{b:true,sz:20,c:'003087'})]})]  }),
-        new _D.TableCell({width:{size:2000,type:'dxa'},shading:{fill:'003087',type:'clear'},margins:{top:65,bottom:65,left:60,right:120},borders:_bds,
-          children:[new _D.Paragraph({alignment:'right',children:[_tr(reste.toLocaleString('fr-FR')+' € HT',{b:true,sz:20,c:'FFFFFF'})]})]  }),
-      ]}),
-    ]}));
-    if(plafAtteint){
-      out.push(new _D.Paragraph({
-        children:[_tr('⚠️  Plafond FIPU : la subvention est limitée à 25 000 € HT réglementairement, quel que soit le montant de l\'investissement.',{sz:15,i:true,c:'854f0b'})],
-        spacing:{before:40,after:60},indent:{left:120}
-      }));
+    out.push(_sp(160));
+    function fipuRow(lbl,sub,val,fill,valColor){
+      return new _D.TableRow({cantSplit:true,children:[
+        new _D.TableCell({width:{size:7034,type:'dxa'},borders:_NB,shading:{fill:fill,type:'clear',color:'auto'},
+          margins:{top:120,bottom:120,left:220,right:80},children:[
+            new _D.Paragraph({spacing:{before:0,after:0},children:[
+              _tr(lbl,{sz:20,b:true,c:valColor}), sub?_tr(' — '+sub,{sz:15,i:true,c:valColor}):_tr('')
+            ]})]}),
+        new _D.TableCell({width:{size:3000,type:'dxa'},borders:_NB,shading:{fill:fill,type:'clear',color:'auto'},
+          margins:{top:120,bottom:120,left:80,right:220},verticalAlign:'center',
+          children:[_p(val,{sz:26,b:true,c:valColor,f:FH,al:'right',pb:0,pa:0})]})
+      ]});
     }
-    out.push(_p(''));
-    out.push(_h2('DOCUMENTS À FOURNIR — DISPOSITIF FIPU'));
-    var docsFipu=[
-      'Document Unique d\'Évaluation des Risques (DUER) à jour de moins d\'1 an',
-      'Extrait KBIS de moins de 3 mois',
-      'RIB de l\'entreprise',
-      'Attestation fournisseur Multi-Chariots',
-      'Facture acquittée',
-      'Attestation sur l\'honneur de minimis',
-    ];
-    docsFipu.forEach(function(doc){
-      out.push(new _D.Paragraph({
-        children:[_tr('☐   '+doc,{sz:19})],
-        spacing:{before:60,after:60},
-        indent:{left:200}
-      }));
-    });
-  }
-
-  // ---- Maintenance préventive (optionnelle, hors total) ----
-  if(d.maint){
-    var nbV=parseInt(d.maint.v)||2,pV=parseFloat(d.maint.p)||180;
-    out.push(_p('',{pb:80,pa:20}));
-    out.push(new _D.Paragraph({
-      children:[_tr('ENTRETIEN PRÉVENTIF (optionnel)',{b:true,sz:18,c:'003087'})],
-      border:{bottom:{style:'single',size:4,color:'F47C20',space:2}},
-      spacing:{before:80,after:80}
-    }));
-    var maintCW=[6200,800,2000];
-    var maintRows=[];
-    maintRows.push(new _D.TableRow({children:[
-      new _D.TableCell({width:{size:maintCW[0],type:'dxa'},shading:{fill:'EDF1F7',type:'clear'},borders:_bds,margins:{top:55,bottom:55,left:120,right:60},
-        children:[new _D.Paragraph({children:[_tr('Maintenance préventive — '+nbV+' visite'+(nbV>1?'s':'')+'/an',{sz:18})]})]  }),
-      new _D.TableCell({width:{size:maintCW[1],type:'dxa'},shading:{fill:'EDF1F7',type:'clear'},borders:_bds,margins:{top:55,bottom:55,left:40,right:40},
-        children:[new _D.Paragraph({alignment:'center',children:[_tr(String(nbV),{sz:18})]})]}),
-      new _D.TableCell({width:{size:maintCW[2],type:'dxa'},shading:{fill:'EDF1F7',type:'clear'},borders:_bds,margins:{top:55,bottom:55,left:60,right:120},
-        children:[new _D.Paragraph({alignment:'right',children:[_tr(pV.toLocaleString('fr-FR')+' € HT/visite',{sz:18})]})]}),
+    out.push(new _D.Table({width:{size:W,type:'dxa'},columnWidths:[7034,3000],layout:'fixed',borders:_NBT,rows:[
+      fipuRow('Subvention FIPU 70 %',plafAtteint?'plafond 25 000 € HT atteint':'accordée sur le montant total','− '+_euro(subvEff)+' € HT','EAF3EC',MC_GREEN),
+      fipuRow('Reste à charge HT','',_euro(reste)+' € HT',MC_BG,MC_ACCENT)
     ]}));
-    out.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:maintCW,rows:maintRows}));
-    out.push(new _D.Paragraph({
-      children:[
-        _tr('⚠️  ',{sz:16}),
-        _tr('Prestation non incluse dans le total ci-dessus — facturée au passage du technicien.',{sz:15,i:true,c:'854f0b'}),
-      ],
-      spacing:{before:50,after:60},
-      indent:{left:120}
-    }));
+    if(plafAtteint)out.push(_p('⚠ Plafond FIPU : la subvention est limitée à 25 000 € HT réglementairement, quel que soit le montant de l\'investissement.',{sz:16,i:true,c:MC_AMBER,pb:80,pa:60}));
+    out.push(_sp(180));
+    out.push(_kicker('Documents à fournir — dispositif FIPU'));
+    var docsFipu=['Document Unique d\'Évaluation des Risques (DUER) à jour de moins d\'1 an','Extrait KBIS de moins de 3 mois','RIB de l\'entreprise','Attestation fournisseur Multi-Chariots','Facture acquittée','Attestation sur l\'honneur de minimis'];
+    out.push(_checkGrid(docsFipu,{cols:2,mark:'☐',markColor:MC_ACCENT_700}));
   }
 
+  // ---- Maintenance préventive (hors total) ----
+  if(d.maint){
+    var nbV=parseInt(d.maint.v)||2, pV=parseFloat(d.maint.p)||180;
+    out.push(_sp(200));
+    out.push(_box([
+      _p('Entretien préventif (optionnel)',{sz:15,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18,pb:0,pa:80}),
+      new _D.Paragraph({tabStops:[{type:'right',position:W-480}],spacing:{before:0,after:0},children:[
+        _tr('Maintenance préventive — '+nbV+' visite'+(nbV>1?'s':'')+'/an',{sz:20}),
+        new _D.TextRun({children:[new _D.Tab()]}),
+        _tr(_euro(pV)+' € HT / visite',{sz:20,b:true,c:MC_ACCENT})
+      ]}),
+      _p('Prestation non incluse dans le total ci-dessus — facturée au passage du technicien.',{sz:15,i:true,c:MC_MUTED,pb:80,pa:0})
+    ],{fill:MC_BG}));
+  }
+  out.push(_sp(220));
   return out;
 }
 
 // ============================================================
-// SECTION 9 — LLD
+// SOLUTION LLD
 // ============================================================
-function _buildLLD(d){
+function _secLLD(d){
   var f=d.f||'invest';
-  if(f!=='lld'&&f!=='both')return[];
+  if(f!=='lld'&&f!=='both')return [];
   var loyers=d.loyers||[];
-  if(!loyers.length)return[];
-  var durs=d.durees||[60];
-  var out=[_h2('SOLUTION LLD — LOCATION LONGUE DURÉE')];
-  if(d.lld&&d.lld.h)out.push(_p('Heures travaillées/an : '+d.lld.h+'h',{b:true,sz:18,c:'003087',pb:60,pa:40}));
-  // Header row
-  // Construire la liste complète des durées à afficher (depuis d.durees)
-  // ET depuis les prices de chaque loyer pour ne pas en manquer
+  if(!loyers.length)return [];
+  var durs=(d.lld&&d.lld.durees)||d.durees||[60];
+  var out=[_kicker('Solution LLD — location longue durée')];
+  if(d.lld&&d.lld.h)out.push(_p('Heures travaillées / an : '+d.lld.h+' h',{sz:19,c:MC_MUTED,pb:0,pa:120}));
+
   var allDurs=[];
-  durs.forEach(function(d){if(allDurs.indexOf(d)<0)allDurs.push(d);});
-  loyers.forEach(function(l){if(l.prices&&typeof l.prices==='object'){Object.keys(l.prices).forEach(function(k){var v=parseInt(k);if(v&&allDurs.indexOf(v)<0)allDurs.push(v);});}});
+  durs.forEach(function(x){ if(allDurs.indexOf(x)<0)allDurs.push(x); });
+  loyers.forEach(function(l){ if(l.prices&&typeof l.prices==='object')Object.keys(l.prices).forEach(function(k){var v=parseInt(k);if(v&&allDurs.indexOf(v)<0)allDurs.push(v);}); });
   allDurs.sort(function(a,b){return a-b;});
   if(!allDurs.length)allDurs=[60];
-  var colDesig=allDurs.length<=2?4500:allDurs.length<=3?3600:3000;
-  var colLoy=Math.floor((9000-colDesig)/allDurs.length);
-  var hCells=[new _D.TableCell({width:{size:colDesig,type:'dxa'},shading:{fill:'003087',type:'clear'},margins:{top:60,bottom:60,left:80,right:80},borders:_bds,children:[new _D.Paragraph({children:[_tr('DÉSIGNATION',{b:true,sz:17,c:'FFFFFF'})]})]}  )];
-  allDurs.forEach(function(dur){hCells.push(new _D.TableCell({width:{size:colLoy,type:'dxa'},shading:{fill:'003087',type:'clear'},margins:{top:60,bottom:60,left:80,right:80},borders:_bds,children:[
-    new _D.Paragraph({alignment:'center',children:[_tr(dur+' MOIS',{b:true,sz:17,c:'FFFFFF'})]}),
-    new _D.Paragraph({alignment:'center',children:[_tr('€ HT / mensuel',{sz:13,c:'CCDDFF',i:true})]}),
-  ]}));});
-  var tRows=[new _D.TableRow({children:hCells})];
+
+  var colDesig=allDurs.length<=2?4800:(allDurs.length<=3?4000:3200);
+  var colLoy=Math.floor((W-480-colDesig)/allDurs.length);
+  var hb={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_ACCENT,8)};
+  var hCells=[new _D.TableCell({width:{size:colDesig,type:'dxa'},borders:hb,margins:{top:60,bottom:90,left:0,right:80},
+    children:[_p('Désignation',{sz:14,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18,pb:0,pa:0})]})];
+  allDurs.forEach(function(dur){
+    hCells.push(new _D.TableCell({width:{size:colLoy,type:'dxa'},borders:hb,margins:{top:60,bottom:90,left:60,right:60},children:[
+      _p(dur+' mois',{sz:14,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18,al:'center',pb:0,pa:0}),
+      _p('€ HT / mois',{sz:13,c:MC_MUTED,i:true,al:'center',pb:0,pa:0})
+    ]}));
+  });
+  var tRows=[new _D.TableRow({tableHeader:true,cantSplit:true,children:hCells})];
   var colW=[colDesig].concat(allDurs.map(function(){return colLoy;}));
   loyers.forEach(function(l){
-    if(l.prices&&typeof l.prices==='object'){
-      allDurs.forEach(function(dur){if(l.prices[dur]===undefined)l.prices[dur]=l.v||0;});
-    }else{
-      l.prices={};allDurs.forEach(function(dur){l.prices[dur]=l.v||0;});
-    }
-    var cells=[new _D.TableCell({width:{size:colDesig,type:'dxa'},borders:_bds,margins:{top:50,bottom:50,left:80,right:80},children:[new _D.Paragraph({children:[_tr(l.d||'',{sz:18})]})]}  )];
+    if(l.prices&&typeof l.prices==='object'){ allDurs.forEach(function(dur){ if(l.prices[dur]===undefined)l.prices[dur]=l.v||0; }); }
+    else { l.prices={}; allDurs.forEach(function(dur){ l.prices[dur]=l.v||0; }); }
+    var rb={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_HAIRLINE,2)};
+    var cells=[new _D.TableCell({width:{size:colDesig,type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:0,right:80},
+      children:[_p(l.d||'',{sz:20,pb:0,pa:0})]})];
     allDurs.forEach(function(dur){
       var lv=parseFloat(l.prices[dur])||0;
-      cells.push(new _D.TableCell({width:{size:colLoy,type:'dxa'},shading:{fill:'F5F8FF',type:'clear'},borders:_bds,margins:{top:50,bottom:50,left:80,right:80},children:[new _D.Paragraph({alignment:'center',children:[_tr(lv?lv.toLocaleString('fr-FR')+'€':'—',{b:true,sz:18,c:'003087'})]})]  }));
+      cells.push(new _D.TableCell({width:{size:colLoy,type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:60,right:60},
+        children:[_p(lv?_euro(lv)+' €':'—',{sz:22,b:true,c:MC_ORANGE,f:FH,al:'center',pb:0,pa:0})]}));
     });
-    tRows.push(new _D.TableRow({children:cells}));
+    tRows.push(new _D.TableRow({cantSplit:true,children:cells}));
   });
-  out.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:colW,rows:tRows}));
-  // VGP — optionnelle, en supplément
+  out.push(_box([new _D.Table({width:{size:W-480,type:'dxa'},columnWidths:colW,layout:'fixed',borders:_NBT,rows:tRows})],{split:true}));
+
   if(d.vgp&&d.vgp_p){
-    out.push(new _D.Paragraph({
-      children:[
-        _tr('🔍  VGP semestrielle (optionnel) : '+(parseFloat(d.vgp_p)||27)+' € HT/mois — ',{sz:17,c:'003087',b:true}),
-        _tr('En supplément du loyer, non incluse dans le contrat LLD',{sz:15,c:'888888',i:true}),
-      ],
-      spacing:{before:80,after:40}
-    }));
+    out.push(_p([
+      _tr('VGP semestrielle (option) : ',{sz:19,b:true,c:MC_ACCENT}),
+      _tr((parseFloat(d.vgp_p)||27)+' € HT/mois — en supplément du loyer, non incluse dans le contrat LLD',{sz:19,c:MC_MUTED})
+    ],{pb:140,pa:60}));
   }
-  // Tableau Inclus / Exclus
-  var inclus=[
-    'Services préventifs et curatifs',
-    'Main-d\'œuvre et déplacements',
-    'Pièces de remplacement (usure normale)',
-    'Remplacement du matériel sous 48h–72h si panne persistante',
-  ];
-  var exclus=[
-    'Casse, vandalisme, accidents',
-    'Assurances',
-    'Roues et pneumatiques',
-    'VGP semestrielle (en option)',
-  ];
-  var maxRows=Math.max(inclus.length,exclus.length);
-  var serviceRows=[];
-  // En-tête
-  serviceRows.push(new _D.TableRow({children:[
-    new _D.TableCell({width:{size:4500,type:'dxa'},shading:{fill:'1a7a4a',type:'clear'},margins:{top:55,bottom:55,left:100,right:80},borders:_bds,
-      children:[new _D.Paragraph({children:[_tr('✅  INCLUS DANS LE LOYER',{b:true,sz:17,c:'FFFFFF'})]})]  }),
-    new _D.TableCell({width:{size:4500,type:'dxa'},shading:{fill:'dc3545',type:'clear'},margins:{top:55,bottom:55,left:100,right:80},borders:_bds,
-      children:[new _D.Paragraph({children:[_tr('❌  EXCLUS DU CONTRAT',{b:true,sz:17,c:'FFFFFF'})]})]  }),
-  ]}));
-  for(var ri=0;ri<maxRows;ri++){
-    var iItem=inclus[ri]||'';
-    var eItem=exclus[ri]||'';
-    var bg=ri%2===0?'F0FAF0':'FFFFFF';
-    var bg2=ri%2===0?'FFF0F0':'FFFFFF';
-    serviceRows.push(new _D.TableRow({children:[
-      new _D.TableCell({width:{size:4500,type:'dxa'},shading:{fill:bg,type:'clear'},borders:_bds,margins:{top:45,bottom:45,left:100,right:80},
-        children:[new _D.Paragraph({children:[iItem?_tr('✓  '+iItem,{sz:17,c:'1a7a4a'}):_tr('',{sz:17})]})]}),
-      new _D.TableCell({width:{size:4500,type:'dxa'},shading:{fill:bg2,type:'clear'},borders:_bds,margins:{top:45,bottom:45,left:100,right:80},
-        children:[new _D.Paragraph({children:[eItem?_tr('✗  '+eItem,{sz:17,c:'dc3545'}):_tr('',{sz:17})]})]}),
-    ]}));
-  }
-  out.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[4500,4500],rows:serviceRows}));
-  // Caution
+
+  out.push(_sp(160));
+  var inclus=['Services préventifs et curatifs','Main-d\'œuvre et déplacements','Pièces de remplacement (usure normale)','Remplacement du matériel sous 48h–72h si panne persistante'];
+  var exclus=['Casse, vandalisme, accidents','Assurances','Roues et pneumatiques','VGP semestrielle (en option)'];
+  var incChildren=[_p('Inclus dans le loyer',{sz:14,c:MC_GREEN,f:FH,b:true,caps:true,ls:18,pb:0,pa:80})];
+  inclus.forEach(function(x,i){ incChildren.push(_checkPar(x,'✓',MC_GREEN,i===inclus.length-1)); });
+  var excChildren=[_p('Exclus du contrat',{sz:14,c:MC_RED,f:FH,b:true,caps:true,ls:18,pb:0,pa:80})];
+  exclus.forEach(function(x,i){ excChildren.push(_checkPar(x,'✗',MC_RED,i===exclus.length-1)); });
+  out.push(_boxRow([{children:incChildren},{children:excChildren}]));
+
   if(d.caution_lld&&loyers.length){
-    var cDur=durs[0]||60;
-    var cLoy=loyers[0];
+    var cDur=allDurs[0]||60, cLoy=loyers[0];
     var cLv=cLoy.prices?parseFloat(cLoy.prices[cDur])||0:parseFloat(cLoy.v)||0;
     var cAmt=Math.round(cLv*6);
-    out.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[5400,3600],rows:[
-      new _D.TableRow({children:[
-        new _D.TableCell({width:{size:5400,type:'dxa'},shading:{fill:'FFF4EC',type:'clear'},margins:{top:70,bottom:70,left:120,right:80},borders:_bds,children:[new _D.Paragraph({children:[_tr('🔒  Caution — Dépôt de garantie (6 mois de loyer)',{b:true,sz:18,c:'854f0b'})]})]  }),
-        new _D.TableCell({width:{size:3600,type:'dxa'},shading:{fill:'F47C20',type:'clear'},margins:{top:70,bottom:70,left:80,right:120},borders:_bds,children:[new _D.Paragraph({alignment:'right',children:[_tr(cAmt?cAmt.toLocaleString('fr-FR')+' € HT':'À définir',{b:true,sz:20,c:'FFFFFF'})]})]  }),
-      ]})
-    ]}));
-    out.push(_p('Encaissée à la signature du contrat — restituée en fin de contrat sous réserve du bon état du matériel.',{sz:15,i:true,c:'888888',pb:40,pa:20}));
+    out.push(_sp(160));
+    out.push(_box([
+      new _D.Paragraph({tabStops:[{type:'right',position:W-480}],spacing:{before:0,after:0},children:[
+        _tr('Caution — dépôt de garantie (6 mois de loyer)',{sz:20,b:true,c:MC_ACCENT}),
+        new _D.TextRun({children:[new _D.Tab()]}),
+        _tr(cAmt?_euro(cAmt)+' € HT':'À définir',{sz:26,b:true,c:MC_ORANGE,f:FH})
+      ]}),
+      _p('Encaissée à la signature du contrat — restituée en fin de contrat sous réserve du bon état du matériel.',{sz:15,i:true,c:MC_MUTED,pb:60,pa:0})
+    ],{fill:MC_BG}));
   }
+  out.push(_sp(220));
   return out;
 }
 
 // ============================================================
-// SECTION 10 — Reprise
+// REPRISE MATÉRIEL
 // ============================================================
-function _buildReprise(d){
-  if(!d.rep)return[];
-  var rows=[];
-  if(d.rep.m)rows.push(_kvp('🔄','Matériel repris',d.rep.m));
-  if(d.rep.et)rows.push(_kvp('📋','État',d.rep.et));
-  if(d.rep.a)rows.push(_kvp('📅','Année',d.rep.a));
-  if(d.rep.h)rows.push(_kvp('⏱️','Heures',d.rep.h+'h'));
-  if(d.rep.c)rows.push(_kvp('💬','Commentaire',d.rep.c));
-  if(d.rep.v)rows.push(_kvp('💰','Valeur reprise',(parseFloat(d.rep.v)||0).toLocaleString('fr-FR')+'€ HT'));
-  if(!rows.length)return[];
-  return[_h2('REPRISE MATÉRIEL'),_table2col(rows)];
+function _secReprise(d){
+  if(!d.rep)return [];
+  var items=[];
+  if(d.rep.m)items.push(['Matériel repris',d.rep.m]);
+  if(d.rep.etat)items.push(['État',d.rep.etat]);
+  if(d.rep.annee)items.push(['Année',d.rep.annee]);
+  if(d.rep.heures)items.push(['Heures',d.rep.heures+' h']);
+  if(d.rep.v)items.push(['Valeur de reprise',_euro(d.rep.v)+' € HT']);
+  if(d.rep.com)items.push(['Commentaire',d.rep.com]);
+  if(!items.length)return [];
+  return [_box([_kicker('Reprise matériel'),_fieldGrid(items,3,W-480)]),_sp(220)];
 }
 
 // ============================================================
-// SECTION 11 — Livraison
+// LIVRAISON & RÈGLEMENT (deux blocs côte à côte)
 // ============================================================
-function _buildLivraison(d){
-  var liv=d.liv||{};
-  var rows=[];
+function _secLivraisonReglement(d){
+  var liv=d.liv||{}, f=d.f||'invest';
   var fPort=parseFloat(liv.f)||0;
-  rows.push(_kvp('🚚','Frais de livraison',fPort===0?'OFFERTS':fPort.toLocaleString('fr-FR')+'€ HT'));
-  if(liv.d)rows.push(_kvp('📅','Délai de livraison',liv.d));
-  if(liv.stock)rows.push(_kvp('📦','Stock',liv.stock));
-  return[_h2('LIVRAISON & CONDITIONS'),_table2col(rows)];
-}
+  var livChildren=[_kicker('Livraison & conditions')];
+  livChildren.push(_label('Frais de livraison'));
+  livChildren.push(_value(fPort===0?'OFFERTS':_euro(fPort)+' € HT'));
+  if(liv.d){ livChildren.push(_label('Délai de livraison')); livChildren.push(_value(liv.d)); }
+  if(liv.stock){ livChildren.push(_label('Stock')); livChildren.push(_value(liv.stock)); }
 
-// ============================================================
-// SECTION 12 — Commentaires
-// ============================================================
-function _buildCommentaires(d){
-  if(!d.commentaires)return[];
-  return[_h2('COMMENTAIRES'),_p(d.commentaires,{sz:18})];
-}
-
-// ============================================================
-// SECTION 13 — Conditions de règlement
-// ============================================================
-function _buildConditionsReglement(d){
-  var f=d.f||'invest';
-  var rows=[];
+  var regChildren=[_kicker('Conditions de règlement')];
   if(f==='invest'||f==='carsat'||f==='both'){
-    rows.push(_kvp('💳','Investissement',
-      '50% à la commande — Solde exigible avant la livraison'));
+    regChildren.push(_label('Investissement'));
+    regChildren.push(_value('50 % à la commande — solde exigible avant la livraison'));
   }
   if(f==='lld'||f==='both'){
-    rows.push(_kvp('📋','Location longue durée (LLD)',
-      'Mandat de prélèvement automatique SEPA — Échéance trimestrielle'));
-
+    regChildren.push(_label('Location longue durée (LLD)'));
+    regChildren.push(_value('Mandat de prélèvement SEPA — échéance trimestrielle'));
   }
-  if(!rows.length)return[];
-  return[_h2('CONDITIONS DE RÈGLEMENT'),_table2col(rows)];
+  return [_boxRow([{children:livChildren},{children:regChildren}]),_sp(220)];
 }
 
 // ============================================================
-// SECTION 13 — Signature
+// COMMENTAIRES
 // ============================================================
-function _buildSignature(d){
-  return[
-    _h2('ACCEPTATION DE L\'OFFRE'),
-    _p('Bon pour accord — Cachet et signature :',{sz:18,b:true,c:'003087',pb:40,pa:160}),
-    new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[4000,5000],rows:[
-      new _D.TableRow({children:[
-        new _D.TableCell({width:{size:4000,type:'dxa'},borders:_bds,margins:{top:60,bottom:60,left:80,right:80},children:[
-          new _D.Paragraph({children:[_tr('Date',{sz:16,c:'888888'})]}),
-          _p(''),_p(''),
-          new _D.Paragraph({children:[_tr('Signature',{sz:16,c:'888888'})]}),
-          _p(''),_p(''),
-        ]}),
-        new _D.TableCell({width:{size:5000,type:'dxa'},borders:_bds,margins:{top:60,bottom:60,left:80,right:80},children:[
-          new _D.Paragraph({children:[_tr('Cachet de la société',{sz:16,c:'888888'})]}),
-          _p(''),_p(''),_p(''),
-        ]}),
-      ]})
-    ]}),
+function _secCommentaires(d){
+  if(!d.commentaires)return [];
+  return [_box([_kicker('Commentaires'),_p(d.commentaires,{sz:19,pb:0,pa:0})]),_sp(220)];
+}
+
+// ============================================================
+// ACCEPTATION DE L'OFFRE — 3 cases date / signature / cachet
+// ============================================================
+function _secAcceptation(d){
+  var out=[_kicker('Acceptation de l\'offre'),_h3('Bon pour accord')];
+  out.push(_p('Bon pour accord — cachet et signature :',{sz:19,c:MC_MUTED,pb:0,pa:180}));
+  function cell(lbl){ return {children:[_label(lbl),_p('',{sz:2,pb:0,pa:0})],minH:1400}; }
+  out.push(_boxRow([cell('Date'),cell('Signature'),cell('Cachet de la société')]));
+  return out;
+}
+
+// ============================================================
+// PAGE FORMATIONS — CACES / habilitations / SST
+// ============================================================
+function _secFormations(){
+  var out=[];
+  out.push(_kicker('Formations',{pageBreak:true}));
+  out.push(_h2('Nos formations & habilitations'));
+  out.push(_lead('Organisme de formation certifié, pour compléter votre équipement d\'un parcours de professionnalisation de vos équipes.'));
+
+  out.push(_boxRow([
+    {children:[
+      _p('  ORGANISME CERTIFIÉ  ',{sz:15,b:true,f:FH,ls:16,c:MC_ACCENT_700,fill:MC_BG,pb:0,pa:100}),
+      _p('QUALIOPI',{sz:30,b:true,f:FH,c:MC_ORANGE,pb:0,pa:60}),
+      _p('Certification qualité pour les actions de formation.',{sz:18,c:MC_MUTED,pb:0,pa:0})
+    ]},
+    {children:[
+      _p('  FORMATIONS FINANÇABLES  ',{sz:15,b:true,f:FH,ls:16,c:MC_ORANGE_INK,fill:MC_ORANGE_SOFT,pb:0,pa:100}),
+      _p('OPCO',{sz:30,b:true,f:FH,c:MC_ACCENT,pb:0,pa:60}),
+      _p('Prise en charge possible par votre OPCO.',{sz:18,c:MC_MUTED,pb:0,pa:0})
+    ]}
+  ]));
+  out.push(_sp(200));
+
+  var cards=[
+    {t:'CACES® & autorisation de conduite',items:[
+      'CACES® R489 — Chariots élévateurs cat. 1, 2, 3, 4, 5, 6',
+      'CACES® R485 — Gerbeurs à conducteur accompagnant',
+      'CACES® R486 — Nacelles élévatrices cat. A & B',
+      'CACES® R484 — Ponts roulants & palans',
+      'Autorisation de conduite délivrée par l\'employeur',
+      'Formation théorique + pratique sur matériels réels']},
+    {t:'Habilitation électrique',items:[
+      'Habilitation B0, H0 — Travaux non électriques',
+      'Habilitation B1, B2 — Travaux sous tension BT',
+      'Habilitation BR — Intervention générale BT',
+      'Habilitation BS — Interventions élémentaires',
+      'Recyclage et mise à jour des habilitations',
+      'Délivrance des titres selon la norme NF C 18-510']},
+    {t:'Formation SST — sauveteur secouriste du travail',items:[
+      'Formation SST initiale — 14 heures',
+      'Recyclage SST (MAC) — 7 heures',
+      'Gestes de premier secours en milieu professionnel',
+      'Valable 24 mois, renouvelable — groupes de 4 à 10 stagiaires']},
+    {t:'Informations pratiques',items:[
+      'Formations réalisables en intra (dans vos locaux)',
+      'Formations inter dans notre centre à Orchies (59)',
+      'Formateurs certifiés et expérimentés',
+      'Devis personnalisé sur demande']}
   ];
+  function card(c){
+    var ch=[_p(c.t,{sz:22,b:true,f:FH,c:MC_INK,pb:0,pa:100})];
+    c.items.forEach(function(it,i){ ch.push(_checkPar(it,'✓',MC_ORANGE,i===c.items.length-1)); });
+    return {children:ch};
+  }
+  out.push(_boxRow([card(cards[0]),card(cards[1])]));
+  out.push(_sp(200));
+  out.push(_boxRow([card(cards[2]),card(cards[3])]));
+
+  out.push(_strip());
+  out.push(_p('Pour toute demande de formation : kevin@multi-chariots.net · 03 20 64 12 12',
+    {sz:19,f:FH,b:true,caps:true,ls:16,c:MC_ACCENT,al:'center',pb:0,pa:0}));
+  return out;
 }
 
 // ============================================================
-// SECTION 14 — Footer + Header du document
+// EN-TÊTE & PIED DE PAGE COURANTS
 // ============================================================
-function _buildDocHeader(d){
+function _docHeader(d){
+  var logoChildren=null;
+  try{
+    if(typeof LOGO_B64_PNG!=='undefined'&&LOGO_B64_PNG){
+      var logoBytes=dataUrlToUint8('data:image/png;base64,'+LOGO_B64_PNG);
+      if(logoBytes){
+        logoChildren=[new _D.Paragraph({spacing:{before:0,after:0},
+          children:[new _D.ImageRun({data:logoBytes,transformation:{width:LOGO_W,height:LOGO_H}})]})];
+      }
+    }
+  }catch(e){ console.warn('[header] logo indisponible :',e.message); }
+  if(!logoChildren)logoChildren=[_p('MULTI.CHARIOTS',{sz:26,b:true,f:FH,c:MC_ACCENT,ls:20,pb:0,pa:0})];
+
   return new _D.Header({children:[
-    new _D.Paragraph({
-      children:[
-        new _D.TextRun({text:'MULTI-CHARIOTS.fr',bold:true,size:18,color:'003087',font:'Calibri'}),
-        new _D.TextRun({text:'     Offre N° '+(d.off.n||'—')+'  |  '+(d.off.d?new Date(d.off.d+'T12:00:00').toLocaleDateString('fr-FR'):new Date().toLocaleDateString('fr-FR'))+'  |  '+d.com.n,size:15,color:'888888',font:'Calibri'}),
-      ],
-      border:{bottom:{style:'single',size:2,color:'F47C20',space:3}},
-      spacing:{after:120}
-    })
+    new _D.Table({width:{size:W,type:'dxa'},columnWidths:[5000,W-5000],layout:'fixed',borders:_NBT,
+      rows:[new _D.TableRow({cantSplit:true,children:[
+        new _D.TableCell({width:{size:5000,type:'dxa'},borders:_NB,margins:{top:0,bottom:60,left:0,right:0},children:logoChildren}),
+        new _D.TableCell({width:{size:W-5000,type:'dxa'},borders:_NB,verticalAlign:'bottom',margins:{top:0,bottom:80,left:0,right:0},
+          children:[_p('Client : '+((d.cl&&d.cl.s)||'—'),{sz:15,f:FH,b:true,caps:true,ls:18,c:MC_ACCENT_700,al:'right',pb:0,pa:0})]})
+      ]})]}),
+    new _D.Paragraph({children:[_tr('',{sz:2})],
+      border:{bottom:{style:'single',size:4,color:MC_RULE,space:1}},spacing:{before:0,after:0}})
   ]});
 }
-function _buildDocFooter(){
-  return new _D.Footer({children:[new _D.Paragraph({
-    alignment:'center',
-    border:{top:{style:'single',size:1,color:'D0D5DD',space:2}},
-    children:[
-      new _D.TextRun({text:'www.multi-chariots.fr  |  03 20 64 12 12  |  Dpts 59 & 62  |  SARL au capital de 48 640 €  |  SIRET : 448 076 257 00055  |  NAF : 4669B  |  N° TVA : FR 67 448 076 257  |  Page ',size:12,color:'AAAAAA',font:'Calibri'}),
-      new _D.TextRun({children:[_D.PageNumber.CURRENT],size:14,color:'AAAAAA',font:'Calibri'}),
-      new _D.TextRun({text:' / ',size:14,color:'AAAAAA',font:'Calibri'}),
-      new _D.TextRun({children:[_D.PageNumber.TOTAL_PAGES],size:14,color:'AAAAAA',font:'Calibri'}),
-    ]
-  })]});
+
+function _docFooter(d){
+  var contact=[(d.com&&d.com.e)||'contact@multi-chariots.net',(d.com&&d.com.t)||'03 20 64 12 12'].filter(Boolean).join(' · ');
+  return new _D.Footer({children:[
+    new _D.Paragraph({
+      tabStops:[{type:'right',position:W}],
+      border:{top:{style:'single',size:4,color:MC_RULE,space:4}},
+      spacing:{before:80,after:20},
+      children:[
+        _tr('Multi.Chariots — Votre expert en matériel de manutention depuis 1996',{sz:14,c:MC_MUTED}),
+        new _D.TextRun({children:[new _D.Tab()]}),
+        _tr(contact,{sz:14,c:MC_MUTED})
+      ]}),
+    new _D.Paragraph({alignment:'center',spacing:{before:0,after:0},children:[
+      _tr('SARL au capital de 48 640 € · SIRET 448 076 257 00055 · NAF 4669B · TVA FR 67 448 076 257 · Page ',{sz:12,c:MC_MUTED}),
+      new _D.TextRun({children:[_D.PageNumber.CURRENT],size:12,color:MC_MUTED,font:FB}),
+      _tr(' / ',{sz:12,c:MC_MUTED}),
+      new _D.TextRun({children:[_D.PageNumber.TOTAL_PAGES],size:12,color:MC_MUTED,font:FB})
+    ]})
+  ]});
 }
 
 // ============================================================
-// BUILDOC — Point d'entrée principal
+// BUILDOC — point d'entrée
 // ============================================================
 async function buildDoc(d){
-  // Border constants are module-level (_bds, _nb)
   var D=window.docx;
-  _D=D;  // Initialize module-level D for helper functions
-  // Sécuriser les données manquantes
-  d=d||{};
-  d.com=d.com||{};d.off=d.off||{};d.cl=d.cl||{};d.liv=d.liv||{};
-  d.cd=d.cd||{};d.prix=d.prix||[];d.loyers=d.loyers||[];
-  d.durees=d.durees&&d.durees.length?d.durees:[60];
-  d.opts=d.opts||[];d.photos=d.photos||[];
-  d.garanties=d.garanties||[];
+  _D=D;
+  _resetSec();
 
-  // Filtrer les photos invalides
+  // Sécurisation des données
+  d=d||{};
+  d.com=d.com||{}; d.off=d.off||{}; d.cl=d.cl||{}; d.liv=d.liv||{};
+  d.cd=d.cd||{}; d.prix=d.prix||[]; d.loyers=d.loyers||[];
+  d.durees=(d.durees&&d.durees.length)?d.durees:[60];
+  d.opts=d.opts||[]; d.photos=d.photos||[]; d.garanties=d.garanties||[];
   d.photos=d.photos.filter(function(p){return p&&p.d&&typeof p.d==='string'&&p.d.indexOf(',')>=0;});
 
-  // Construire les sections (certaines sont async pour les photos)
   var ch=[];
-  _buildHeader(d).forEach(function(el){ch.push(el);});
-  _buildClient(d).forEach(function(el){ch.push(el);});
-  _buildIntro(d).forEach(function(el){ch.push(el);});
-  // Fiche matériel puis Options à la suite
-  _buildFiche(d).forEach(function(el){ch.push(el);});
-  _buildOptions(d).forEach(function(el){ch.push(el);});
-  var photoSection=await _buildPhotos(d.photos);
-  photoSection.forEach(function(el){ch.push(el);});
-  _buildGaranties(d).forEach(function(el){ch.push(el);});
-  _buildPrix(d).forEach(function(el){ch.push(el);});
-  _buildLLD(d).forEach(function(el){ch.push(el);});
-  _buildReprise(d).forEach(function(el){ch.push(el);});
-  _buildLivraison(d).forEach(function(el){ch.push(el);});
-  _buildCommentaires(d).forEach(function(el){ch.push(el);});
-  _buildConditionsReglement(d).forEach(function(el){ch.push(el);});
-  _buildSignature(d).forEach(function(el){ch.push(el);});
+  function add(arr){ (arr||[]).forEach(function(el){ ch.push(el); }); }
 
-  // Page 2 — Formation CACES/Qualiopi (toujours incluse, nouvelle page)
-  ch.push(new _D.Paragraph({pageBreakBefore:true,children:[_tr('',{sz:4})]}));
-  _buildPage2Formation().forEach(function(el){ch.push(el);});
+  ch.push(_bannerTitle(d));
+  ch.push(_sp(300));
 
-  var doc=new D.Document({sections:[{
-    properties:{page:{size:{width:11906,height:16838},margin:{top:900,right:900,bottom:900,left:900}}},
-    headers:{default:_buildDocHeader(d)},
-    footers:{default:_buildDocFooter()},
-    children:ch
-  }]});
+  add(_secClient(d));
+  add(_secObjet(d));
+  add(_secMateriel(d));
+  add(await _secPhotos(d.photos));
+  add(_secEquipements(d));
+  add(_secGaranties(d));
+  add(_secPrix(d));
+  add(_secLLD(d));
+  add(_secReprise(d));
+  add(_secLivraisonReglement(d));
+  add(_secCommentaires(d));
+  add(_secAcceptation(d));
+  add(_secFormations());
+
+  var doc=new D.Document({
+    creator:'Multi-Chariots',
+    title:'Proposition commerciale '+(d.off.n||''),
+    description:'Proposition commerciale — '+(d.cl.s||''),
+    styles:{default:{document:{run:{font:FB,size:20,color:MC_INK}}}},
+    sections:[{
+      properties:{page:{
+        size:{width:11906,height:16838},
+        margin:{top:1560,right:936,bottom:1300,left:936,header:560,footer:400}
+      }},
+      headers:{default:_docHeader(d)},
+      footers:{default:_docFooter(d)},
+      children:ch
+    }]
+  });
 
   return await D.Packer.toBase64String(doc);
-}
-
-
-// ============================================================
-// PAGE 2 — Présentation Formation CACES + Habilitations (Qualiopi)
-// ============================================================
-function _buildPage2Formation(){
-  var ch2=[];
-
-  // Titre principal
-  ch2.push(new _D.Paragraph({
-    alignment:'center',
-    children:[_tr('NOS FORMATIONS & HABILITATIONS',{b:true,sz:28,c:'003087'})],
-    spacing:{before:0,after:60}
-  }));
-  ch2.push(new _D.Paragraph({
-    children:[_tr('',{sz:4})],
-    border:{bottom:{style:'single',size:10,color:'F47C20',space:3}},
-    spacing:{before:0,after:200}
-  }));
-
-  // Badges Qualiopi + OPCO
-  ch2.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[4500,4500],rows:[
-    new _D.TableRow({children:[
-      new _D.TableCell({width:{size:4500,type:'dxa'},borders:_nb,shading:{fill:'EDF1F7',type:'clear'},margins:{top:120,bottom:120,left:160,right:80},children:[
-        new _D.Paragraph({alignment:'center',children:[_tr('✅  ORGANISME CERTIFIÉ',{b:true,sz:22,c:'003087'})]}),
-        new _D.Paragraph({alignment:'center',children:[_tr('QUALIOPI',{b:true,sz:32,c:'F47C20'})]}),
-        new _D.Paragraph({alignment:'center',children:[_tr('Certification qualité pour les actions de formation',{sz:17,c:'555555'})]}),
-      ]}),
-      new _D.TableCell({width:{size:4500,type:'dxa'},borders:_nb,shading:{fill:'EDF1F7',type:'clear'},margins:{top:120,bottom:120,left:80,right:160},children:[
-        new _D.Paragraph({alignment:'center',children:[_tr('💼  FORMATIONS FINANÇABLES',{b:true,sz:22,c:'003087'})]}),
-        new _D.Paragraph({alignment:'center',children:[_tr('OPCO',{b:true,sz:32,c:'1a7a4a'})]}),
-        new _D.Paragraph({alignment:'center',children:[_tr('Prise en charge possible par votre OPCO',{sz:17,c:'555555'})]}),
-      ]}),
-    ]})
-  ]}));
-  ch2.push(_p('',{pb:120,pa:60}));
-
-  // Les 4 formations en tableau 2x2
-  var formations=[
-    {
-      icon:'🏗️',
-      titre:'CACES® & Autorisation de Conduite',
-      color:'003087',
-      items:[
-        'CACES® R489 — Chariots élévateurs cat. 1, 2, 3, 4, 5, 6',
-        'CACES® R485 — Gerbeurs à conducteur accompagnant',
-        'CACES® R486 — Nacelles élévatrices cat. A & B',
-        'CACES® R484 — Ponts roulants & palans',
-        'Autorisation de conduite délivrée par l\'employeur',
-        'Formation théorique + pratique sur matériels réels',
-      ]
-    },
-    {
-      icon:'⚡',
-      titre:'Habilitation Électrique',
-      color:'F47C20',
-      items:[
-        'Habilitation B0, H0 — Travaux non électriques',
-        'Habilitation B1, B2 — Travaux sous tension BT',
-        'Habilitation BR — Intervention générale BT',
-        'Habilitation BS — Interventions élémentaires',
-        'Recyclage et mise à jour des habilitations',
-        'Délivrance des titres selon norme NF C 18-510',
-        'Stages intra ou inter-entreprises',
-      ]
-    },
-    {
-      icon:'🚑',
-      titre:'Formation SST — Sauveteur Secouriste du Travail',
-      color:'dc3545',
-      items:[
-        'Formation SST initiale — 14 heures',
-        'Recyclage SST (MAC) — 7 heures',
-        'Gestes de premier secours en milieu professionnel',
-        'Valable 24 mois, renouvelable',
-        'Groupes de 4 à 10 stagiaires',
-      ]
-    },
-    {
-      icon:'📋',
-      titre:'Informations pratiques',
-      color:'1a7a4a',
-      items:[
-        'Formations réalisables en INTRA (dans vos locaux)',
-        'Formations INTER dans notre centre à Orchies (59)',
-        'Groupes de 4 à 10 stagiaires maximum',
-        'Formateurs certifiés et expérimentés',
-        'Support pédagogique remis à chaque stagiaire',
-        'Attestation de formation remise en fin de stage',
-        'Devis personnalisé sur demande',
-      ]
-    },
-  ];
-
-  function buildFormationCell(f,w){
-    var rows=[
-      new _D.Paragraph({
-        children:[_tr(f.icon+'  '+f.titre,{b:true,sz:19,c:f.color})],
-        spacing:{before:80,after:60}
-      })
-    ];
-    f.items.forEach(function(item){
-      rows.push(new _D.Paragraph({
-        children:[_tr('✓  '+item,{sz:16,c:'333333'})],
-        spacing:{before:30,after:30},
-        indent:{left:160}
-      }));
-    });
-    return new _D.TableCell({width:{size:w,type:'dxa'},borders:_bds,margins:{top:100,bottom:100,left:120,right:120},children:rows});
-  }
-
-  ch2.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[4500,4500],rows:[
-    new _D.TableRow({children:[buildFormationCell(formations[0],4500),buildFormationCell(formations[1],4500)]}),
-  ]}));
-  ch2.push(_p('',{pb:60,pa:60}));
-  ch2.push(new _D.Table({width:{size:9000,type:'dxa'},columnWidths:[4500,4500],rows:[
-    new _D.TableRow({children:[buildFormationCell(formations[2],4500),buildFormationCell(formations[3],4500)]}),
-  ]}));
-
-  // Contact formation
-  ch2.push(_p('',{pb:120,pa:60}));
-  ch2.push(new _D.Paragraph({
-    alignment:'center',
-    border:{top:{style:'single',size:2,color:'F47C20',space:4}},
-    children:[
-      _tr('Pour toute demande de formation : ',{sz:18,c:'555555'}),
-      _tr('kevin@multi-chariots.net  |  03 20 64 12 12',{sz:18,b:true,c:'003087'}),
-    ],
-    spacing:{before:100,after:60}
-  }));
-
-  return ch2;
 }
 
 
