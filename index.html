@@ -1455,8 +1455,22 @@ function _strip(){
 }
 
 // Étiquette + valeur (.im-field-label / .im-field-value)
-function _label(t){ return _p(t,{sz:14,c:MC_MUTED,f:FH,caps:true,ls:16,pb:0,pa:10,keep:true}); }
-function _value(t){ return _p(t||'—',{sz:22,c:MC_INK,pb:0,pa:110}); }
+// Étiquette + liseré orange court. Le filet est porté par un paragraphe vide
+// dédié : le poser sur le libellé lui-même obligerait à réduire la zone de
+// texte (indent droit), ce qui replierait les libellés longs.
+var DASH_W=620;   // longueur du liseré (twips ≈ 1,1 cm)
+function _label(t,w){
+  var out=[_p(t,{sz:14,c:MC_MUTED,f:FH,caps:true,ls:16,pb:0,pa:0,keep:true})];
+  out.push(new _D.Paragraph({
+    children:[_tr('',{sz:2})],
+    indent:{right:Math.max(0,(w||2600)-DASH_W)},
+    border:{bottom:{style:'single',size:6,color:MC_ORANGE,space:0}},
+    spacing:{before:0,after:40,line:120,lineRule:'exact'},
+    keepNext:true
+  }));
+  return out;
+}
+function _value(t){ return _p(t||'—',{sz:22,c:MC_INK,pb:0,pa:90}); }
 
 // Cadre "blueprint" — cellule unique encadrée (les repères d'angle CSS
 // n'existent pas en Word : rendus par un filet fin continu)
@@ -1488,7 +1502,7 @@ function _fieldGrid(items,cols,totalW){
       cells.push(new _D.TableCell({
         width:{size:cw,type:'dxa'}, borders:_NB,
         margins:{top:50,bottom:50,left:0,right:(j===cols-1?0:GAP)},
-        children: it ? [_label(it[0]),_value(it[1])] : [_p('',{sz:2,pb:0,pa:0})]
+        children: it ? _label(it[0],cw-(j===cols-1?0:GAP)).concat([_value(it[1])]) : [_p('',{sz:2,pb:0,pa:0})]
       }));
     }
     rows.push(new _D.TableRow({cantSplit:true,children:cells}));
@@ -1710,25 +1724,80 @@ function _secMateriel(d){
 // ============================================================
 // 04 — PHOTOS (grille adaptative, images embarquées)
 // ============================================================
-function _secPhotos(photos){
+// Décodage asynchrone : fait une seule fois dans buildDoc, le résultat sert
+// à la fois à la galerie et aux vignettes des tableaux
+function _loadPhotos(photos){
   return new Promise(function(resolve){
     var valid=(photos||[]).filter(function(p){return p&&p.d&&typeof p.d==='string'&&p.d.indexOf(',')>=0;});
     if(!valid.length){resolve([]);return;}
-    var loaded=0, imgData=[];
+    var loaded=0, imgData=[], done={};
     valid.forEach(function(ph,idx){
       try{
         var bytes=dataUrlToUint8(ph.d);
-        if(!bytes){ tick(); return; }
+        if(!bytes){ tick(idx); return; }
         var img=new Image();
-        img.onload=function(){ imgData[idx]={bytes:bytes,nw:img.naturalWidth||800,nh:img.naturalHeight||600}; tick(); };
-        img.onerror=function(){ tick(); };
+        img.onload=function(){
+          var rec={bytes:bytes,nw:img.naturalWidth||800,nh:img.naturalHeight||600};
+          // Vignette rééchantillonnée : sans ça, la photo pleine résolution
+          // serait embarquée une deuxième fois pour un affichage de 58 px
+          if(idx===0)rec.thumb=_makeThumb(img,rec);
+          imgData[idx]=rec; tick(idx);
+        };
+        img.onerror=function(){ tick(idx); };
         img.src=ph.d;
-      }catch(e){ tick(); }
+      }catch(e){ tick(idx); }
     });
-    function tick(){ loaded++; if(loaded===valid.length)done(); }
-    function done(){
-      var imgs=imgData.filter(Boolean);
-      if(!imgs.length){resolve([]);return;}
+    // Garde-fou : une image qui déclenche onload puis onerror (ou l'inverse)
+    // ne doit pas faire croire que tout le lot est chargé
+    function tick(idx){
+      if(done[idx])return;
+      done[idx]=true; loaded++;
+      if(loaded===valid.length)resolve(imgData.filter(Boolean));
+    }
+  });
+}
+
+// Vignette du matériel : première photo de la galerie, hauteur fixe
+var THUMB_H=58;          // px @96dpi
+var THUMB_COL=1450;      // largeur de la colonne vignette (twips)
+var _THUMB=null;
+
+// Rééchantillonnage via canvas, à 2× la taille d'affichage pour l'impression.
+// En cas d'échec (canvas indisponible), on retombe sur l'image d'origine.
+function _makeThumb(img,rec){
+  try{
+    var h=THUMB_H*2, w=Math.round(rec.nw*h/rec.nh);
+    if(w>180){ w=180; h=Math.round(rec.nh*w/rec.nw); }
+    var cv=document.createElement('canvas');
+    cv.width=w; cv.height=h;
+    var ctx=cv.getContext('2d');
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h);
+    ctx.drawImage(img,0,0,w,h);
+    var bytes=dataUrlToUint8(cv.toDataURL('image/jpeg',0.82));
+    return bytes&&bytes.length?bytes:null;
+  }catch(e){ console.warn('[vignette] rééchantillonnage impossible :',e.message); return null; }
+}
+function _thumbCell(borders,rowSpanNone){
+  var children=[_p('',{sz:2,pb:0,pa:0})];
+  if(_THUMB){
+    try{
+      var h=THUMB_H, w=Math.round(_THUMB.nw*h/_THUMB.nh);
+      if(w>90){ w=90; h=Math.round(_THUMB.nh*w/_THUMB.nw); }
+      children=[new _D.Paragraph({alignment:'center',spacing:{before:0,after:0},
+        children:[new _D.ImageRun({data:_THUMB.thumb||_THUMB.bytes,transformation:{width:w,height:h}})]})];
+    }catch(e){ /* image illisible : cellule vide */ }
+  }
+  return new _D.TableCell({width:{size:THUMB_COL,type:'dxa'},borders:borders,verticalAlign:'center',
+    margins:{top:70,bottom:70,left:0,right:120},children:children});
+}
+function _emptyCell(w,borders){
+  return new _D.TableCell({width:{size:w,type:'dxa'},borders:borders,children:[_p('',{sz:2,pb:0,pa:0})]});
+}
+
+function _secPhotos(imgs){
+  if(!imgs||!imgs.length)return [];
+  {
+    {
       var cols=imgs.length===1?1:(imgs.length===2?2:3);
       var cellPx=cols===1?300:(cols===2?250:200);   // largeur cible (px @96dpi)
       var out=[_kicker('Photos'),_h3('Le matériel en images')];
@@ -1761,9 +1830,9 @@ function _secPhotos(photos){
       }
       out.push(new _D.Table({width:{size:tw,type:'dxa'},columnWidths:widths,layout:'fixed',borders:_NBT,rows:rows}));
       out.push(_sp(220));
-      resolve(out);
+      return out;
     }
-  });
+  }
 }
 
 // ============================================================
@@ -1799,7 +1868,9 @@ function _secPrix(d){
   var prix=d.prix||[];
   var out=[_kicker(f==='carsat'?'Investissement — dispositif CARSAT FIPU':'Valeur d\'investissement'),_h3('Détail de l\'offre')];
 
-  var CW=[6634,900,2500];
+  // Colonne vignette insérée seulement si une photo est disponible
+  var TH=_THUMB?THUMB_COL:0;
+  var CW=[6634-TH,900,2500];
   var rows=[];
   function hCell(txt,w,al,padL,padR){
     return new _D.TableCell({width:{size:w,type:'dxa'},
@@ -1807,25 +1878,29 @@ function _secPrix(d){
       margins:{top:60,bottom:90,left:padL,right:padR},
       children:[_p(txt,{sz:14,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18,al:al,pb:0,pa:0})]});
   }
-  rows.push(new _D.TableRow({tableHeader:true,cantSplit:true,children:[
-    hCell('Désignation',CW[0],undefined,0,60),
-    hCell('Qté',CW[1],'center',40,40),
-    hCell('Prix HT',CW[2],'right',60,0)
-  ]}));
+  var hb0={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_ACCENT,8)};
+  var hRow=[hCell('Désignation',CW[0],undefined,0,60),
+            hCell('Qté',CW[1],'center',40,40),
+            hCell('Prix HT',CW[2],'right',60,0)];
+  if(TH)hRow.unshift(_emptyCell(TH,hb0));
+  rows.push(new _D.TableRow({tableHeader:true,cantSplit:true,children:hRow}));
 
   var total=0;
-  prix.forEach(function(r){
+  prix.forEach(function(r,idx){
     var v=parseFloat(r.v)||0, q=parseInt(r.q)||1;
     total+=v*q;
     var rb={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_HAIRLINE,2)};
-    rows.push(new _D.TableRow({cantSplit:true,children:[
-      new _D.TableCell({width:{size:CW[0],type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:0,right:60},
+    var cells=[
+      new _D.TableCell({width:{size:CW[0],type:'dxa'},borders:rb,verticalAlign:'center',margins:{top:90,bottom:90,left:0,right:60},
         children:[_p(r.d||'',{sz:20,pb:0,pa:0})]}),
-      new _D.TableCell({width:{size:CW[1],type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:40,right:40},
+      new _D.TableCell({width:{size:CW[1],type:'dxa'},borders:rb,verticalAlign:'center',margins:{top:90,bottom:90,left:40,right:40},
         children:[_p(String(q),{sz:20,al:'center',pb:0,pa:0})]}),
-      new _D.TableCell({width:{size:CW[2],type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:60,right:0},
+      new _D.TableCell({width:{size:CW[2],type:'dxa'},borders:rb,verticalAlign:'center',margins:{top:90,bottom:90,left:60,right:0},
         children:[_p(v?_euro(v)+' € HT':'—',{sz:20,al:'right',pb:0,pa:0})]})
-    ]}));
+    ];
+    // vignette sur la première ligne seulement
+    if(TH)cells.unshift(idx===0?_thumbCell(rb):_emptyCell(TH,rb));
+    rows.push(new _D.TableRow({cantSplit:true,children:cells}));
   });
 
   var remisePct=d.remise_pct||0, remiseFix=d.remise_fix||0;
@@ -1833,19 +1908,21 @@ function _secPrix(d){
   if(remiseMontant>0){
     total-=remiseMontant;
     var rb2={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_HAIRLINE,2)};
-    rows.push(new _D.TableRow({cantSplit:true,children:[
+    var rCells=[
       new _D.TableCell({width:{size:CW[0],type:'dxa'},borders:rb2,margins:{top:90,bottom:90,left:0,right:60},
         children:[_p('Remise commerciale'+(remisePct?' ('+remisePct+' %)':''),{sz:19,i:true,c:MC_GREEN,pb:0,pa:0})]}),
-      new _D.TableCell({width:{size:CW[1],type:'dxa'},borders:rb2,children:[_p('',{sz:2,pb:0,pa:0})]}),
+      _emptyCell(CW[1],rb2),
       new _D.TableCell({width:{size:CW[2],type:'dxa'},borders:rb2,margins:{top:90,bottom:90,left:60,right:0},
         children:[_p('− '+_euro(remiseMontant)+' € HT',{sz:19,b:true,c:MC_GREEN,al:'right',pb:0,pa:0})]})
-    ]}));
+    ];
+    if(TH)rCells.unshift(_emptyCell(TH,rb2));
+    rows.push(new _D.TableRow({cantSplit:true,children:rCells}));
   }
 
   // Ligne TOTAL HT — filet accent 2px, montant orange XXL
   var tb={top:_bd(MC_ACCENT,12),left:_NONE,right:_NONE,bottom:_NONE};
   rows.push(new _D.TableRow({cantSplit:true,children:[
-    new _D.TableCell({width:{size:CW[0]+CW[1],type:'dxa'},columnSpan:2,borders:tb,verticalAlign:'bottom',
+    new _D.TableCell({width:{size:TH+CW[0]+CW[1],type:'dxa'},columnSpan:TH?3:2,borders:tb,verticalAlign:'bottom',
       margins:{top:160,bottom:60,left:0,right:60},children:[
         new _D.Paragraph({spacing:{before:0,after:0},children:[
           _tr('Total HT',{sz:21,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18}),
@@ -1858,7 +1935,8 @@ function _secPrix(d){
 
   // Bloc non sécable : le Total HT ne doit jamais se retrouver seul en tête
   // de page, séparé des lignes qu'il additionne.
-  out.push(_box([new _D.Table({width:{size:W-480,type:'dxa'},columnWidths:CW,layout:'fixed',borders:_NBT,rows:rows})]));
+  var colW=TH?[TH].concat(CW):CW;
+  out.push(_box([new _D.Table({width:{size:W-480,type:'dxa'},columnWidths:colW,layout:'fixed',borders:_NBT,rows:rows})]));
 
   // ---- CARSAT FIPU ----
   if(f==='carsat'&&total>0){
@@ -1919,7 +1997,10 @@ function _secLLD(d){
   if(!loyers.length)return [];
   var durs=(d.lld&&d.lld.durees)||d.durees||[60];
   var out=[_kicker('Solution LLD — location longue durée')];
-  if(d.lld&&d.lld.h)out.push(_p('Heures travaillées / an : '+d.lld.h+' h',{sz:19,c:MC_MUTED,pb:0,pa:120}));
+  if(d.lld&&d.lld.h){
+    var badge=_tags([{txt:'Heures travaillées / an : '+d.lld.h+' h'}]);
+    if(badge){ out.push(badge); out.push(_sp(140)); }
+  }
 
   var allDurs=[];
   durs.forEach(function(x){ if(allDurs.indexOf(x)<0)allDurs.push(x); });
@@ -1927,8 +2008,9 @@ function _secLLD(d){
   allDurs.sort(function(a,b){return a-b;});
   if(!allDurs.length)allDurs=[60];
 
-  var colDesig=allDurs.length<=2?4800:(allDurs.length<=3?4000:3200);
-  var colLoy=Math.floor((W-480-colDesig)/allDurs.length);
+  var THL=_THUMB?THUMB_COL:0;
+  var colDesig=(allDurs.length<=2?4800:(allDurs.length<=3?4000:3200))-THL;
+  var colLoy=Math.floor((W-480-THL-colDesig)/allDurs.length);
   var hb={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_ACCENT,8)};
   var hCells=[new _D.TableCell({width:{size:colDesig,type:'dxa'},borders:hb,margins:{top:60,bottom:90,left:0,right:80},
     children:[_p('Désignation',{sz:14,c:MC_ACCENT_700,f:FH,b:true,caps:true,ls:18,pb:0,pa:0})]})];
@@ -1938,19 +2020,21 @@ function _secLLD(d){
       _p('€ HT / mois',{sz:13,c:MC_MUTED,i:true,al:'center',pb:0,pa:0})
     ]}));
   });
+  if(THL)hCells.unshift(_emptyCell(THL,hb));
   var tRows=[new _D.TableRow({tableHeader:true,cantSplit:true,children:hCells})];
-  var colW=[colDesig].concat(allDurs.map(function(){return colLoy;}));
-  loyers.forEach(function(l){
+  var colW=(THL?[THL]:[]).concat([colDesig]).concat(allDurs.map(function(){return colLoy;}));
+  loyers.forEach(function(l,li){
     if(l.prices&&typeof l.prices==='object'){ allDurs.forEach(function(dur){ if(l.prices[dur]===undefined)l.prices[dur]=l.v||0; }); }
     else { l.prices={}; allDurs.forEach(function(dur){ l.prices[dur]=l.v||0; }); }
     var rb={top:_NONE,left:_NONE,right:_NONE,bottom:_bd(MC_HAIRLINE,2)};
-    var cells=[new _D.TableCell({width:{size:colDesig,type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:0,right:80},
+    var cells=[new _D.TableCell({width:{size:colDesig,type:'dxa'},borders:rb,verticalAlign:'center',margins:{top:90,bottom:90,left:0,right:80},
       children:[_p(l.d||'',{sz:20,pb:0,pa:0})]})];
     allDurs.forEach(function(dur){
       var lv=parseFloat(l.prices[dur])||0;
-      cells.push(new _D.TableCell({width:{size:colLoy,type:'dxa'},borders:rb,margins:{top:90,bottom:90,left:60,right:60},
+      cells.push(new _D.TableCell({width:{size:colLoy,type:'dxa'},borders:rb,verticalAlign:'center',margins:{top:90,bottom:90,left:60,right:60},
         children:[_p(lv?_euro(lv)+' €':'—',{sz:22,b:true,c:MC_ORANGE,f:FH,al:'center',pb:0,pa:0})]}));
     });
+    if(THL)cells.unshift(li===0?_thumbCell(rb):_emptyCell(THL,rb));
     tRows.push(new _D.TableRow({cantSplit:true,children:cells}));
   });
   out.push(_box([new _D.Table({width:{size:W-480,type:'dxa'},columnWidths:colW,layout:'fixed',borders:_NBT,rows:tRows})],{split:true}));
@@ -1966,9 +2050,9 @@ function _secLLD(d){
   var inclus=['Services préventifs et curatifs','Main-d\'œuvre et déplacements','Pièces de remplacement (usure normale)','Remplacement du matériel sous 48h–72h si panne persistante'];
   var exclus=['Casse, vandalisme, accidents','Assurances','Roues et pneumatiques','VGP semestrielle (en option)'];
   var incChildren=[_p('Inclus dans le loyer',{sz:14,c:MC_GREEN,f:FH,b:true,caps:true,ls:18,pb:0,pa:80})];
-  inclus.forEach(function(x,i){ incChildren.push(_checkPar(x,'✓',MC_GREEN,i===inclus.length-1)); });
+  inclus.forEach(function(x){ incChildren.push(_checkPar(x,'✓',MC_GREEN,true)); });
   var excChildren=[_p('Exclus du contrat',{sz:14,c:MC_RED,f:FH,b:true,caps:true,ls:18,pb:0,pa:80})];
-  exclus.forEach(function(x,i){ excChildren.push(_checkPar(x,'✗',MC_RED,i===exclus.length-1)); });
+  exclus.forEach(function(x){ excChildren.push(_checkPar(x,'✗',MC_RED,true)); });
   out.push(_boxRow([{children:incChildren},{children:excChildren}]));
 
   if(d.caution_lld&&loyers.length){
@@ -2012,19 +2096,18 @@ function _secLivraisonReglement(d){
   var liv=d.liv||{}, f=d.f||'invest';
   var fPort=parseFloat(liv.f)||0;
   var livChildren=[_kicker('Livraison & conditions')];
-  livChildren.push(_label('Frais de livraison'));
-  livChildren.push(_value(fPort===0?'OFFERTS':_euro(fPort)+' € HT'));
-  if(liv.d){ livChildren.push(_label('Délai de livraison')); livChildren.push(_value(liv.d)); }
-  if(liv.stock){ livChildren.push(_label('Stock')); livChildren.push(_value(liv.stock)); }
+  var BW2=Math.floor((W-GAP)/2)-400;   // largeur utile d'une cellule de _boxRow
+  function pushField(arr,lbl,val){ _label(lbl,BW2).forEach(function(p){arr.push(p);}); arr.push(_value(val)); }
+  pushField(livChildren,'Frais de livraison',fPort===0?'OFFERTS':_euro(fPort)+' € HT');
+  if(liv.d)pushField(livChildren,'Délai de livraison',liv.d);
+  if(liv.stock)pushField(livChildren,'Stock',liv.stock);
 
   var regChildren=[_kicker('Conditions de règlement')];
   if(f==='invest'||f==='carsat'||f==='both'){
-    regChildren.push(_label('Investissement'));
-    regChildren.push(_value('50 % à la commande — solde exigible avant la livraison'));
+    pushField(regChildren,'Investissement','50 % à la commande — solde exigible avant la livraison');
   }
   if(f==='lld'||f==='both'){
-    regChildren.push(_label('Location longue durée (LLD)'));
-    regChildren.push(_value('Mandat de prélèvement SEPA — échéance trimestrielle'));
+    pushField(regChildren,'Location longue durée (LLD)','Mandat de prélèvement SEPA — échéance trimestrielle');
   }
   return [_boxRow([{children:livChildren},{children:regChildren}]),_sp(220)];
 }
@@ -2043,7 +2126,8 @@ function _secCommentaires(d){
 function _secAcceptation(d){
   var out=[_kicker('Acceptation de l\'offre'),_h3('Bon pour accord')];
   out.push(_p('Bon pour accord — cachet et signature :',{sz:19,c:MC_MUTED,pb:0,pa:180,keep:true}));
-  function cell(lbl){ return {children:[_label(lbl),_p('',{sz:2,pb:0,pa:0})],minH:1400}; }
+  var BW3=Math.floor((W-GAP*2)/3)-400;
+  function cell(lbl){ return {children:_label(lbl,BW3).concat([_p('',{sz:2,pb:0,pa:0})]),minH:1400}; }
   out.push(_boxRow([cell('Date'),cell('Signature'),cell('Cachet de la société')]));
   return out;
 }
@@ -2100,7 +2184,7 @@ function _secFormations(){
   ];
   function card(c){
     var ch=[_p(c.t,{sz:22,b:true,f:FH,c:MC_INK,pb:0,pa:100})];
-    c.items.forEach(function(it,i){ ch.push(_checkPar(it,'✓',MC_ORANGE,i===c.items.length-1)); });
+    c.items.forEach(function(it){ ch.push(_checkPar(it,'✓',MC_ORANGE,true)); });
     return {children:ch};
   }
   out.push(_boxRow([card(cards[0]),card(cards[1])]));
@@ -2196,6 +2280,10 @@ async function buildDoc(d){
   d.opts=d.opts||[]; d.photos=d.photos||[]; d.garanties=d.garanties||[];
   d.photos=d.photos.filter(function(p){return p&&p.d&&typeof p.d==='string'&&p.d.indexOf(',')>=0;});
 
+  // Décodage unique des photos : galerie + vignettes des tableaux
+  var _imgs=await _loadPhotos(d.photos);
+  _THUMB=_imgs[0]||null;
+
   var ch=[];
   function add(arr){ (arr||[]).forEach(function(el){ ch.push(el); }); }
 
@@ -2205,7 +2293,7 @@ async function buildDoc(d){
   add(_secClient(d));
   add(_secObjet(d));
   add(_secMateriel(d));
-  add(await _secPhotos(d.photos));
+  add(_secPhotos(_imgs));
   add(_secEquipements(d));
   add(_secGaranties(d));
   add(_secPrix(d));
