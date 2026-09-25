@@ -4332,7 +4332,7 @@ async function fetchCAPMStock(forceRefresh) {
     console.error('[CAPM] Erreur de chargement :', e);
     // Fallback : essai via proxy CORS si l'appel direct échoue
     try {
-      var proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(CAPM.API_URL);
+      var proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(CAPM.API_URL);
       var resp2 = await fetch(proxyUrl);
       if (!resp2.ok) throw new Error('Proxy HTTP ' + resp2.status);
       var data2 = await resp2.json();
