@@ -410,6 +410,7 @@ body.dark .cat-item:hover{background:#243050}
       <!-- CATEGORIE -->
       <div class="sec">
         <div class="sec-t"><span class="dot"></span>Catégorie de matériel</div>
+        <button type="button" style="margin-bottom:10px;padding:8px 16px;background:#003087;color:#fff;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500" onclick="openCAPMModal()">🔗 Importer depuis CAPM</button>
         <div class="cat-search-wrap">
           <input id="cat-search-input" type="text" placeholder="🔍 Rechercher dans le catalogue Stockman (ex: SDF25N, transpalette, gerbeur...)"
             oninput="catSearch(this.value)" onkeydown="catKey(event)"
@@ -4272,7 +4273,322 @@ window.addEventListener('load',function(){
   setTimeout(noCrmInit,800);
   setTimeout(driveLoad,1200);
   loadDocx(function(){});
+  initCAPM();
 });
+// ============================================================
+// MODULE CAPM EUROPE — Intégration stock HANGCHA
+// Pour le générateur de propositions Multi-Chariots V3
+// ============================================================
+// 
+// INTÉGRATION :
+// 1. Copie ce fichier dans ton projet ou colle le contenu dans ton <script>
+// 2. Ajoute le bouton d'import dans la section matériel du formulaire :
+//    <button class="capm-btn" onclick="openCAPMModal()">🔗 Importer depuis CAPM</button>
+// 3. Ajoute le conteneur de la modale à la fin du body :
+//    <div id="capm-modal"></div>
+// 4. Appelle initCAPM() au chargement de la page (dans ton window.onload)
+//
+// MAPPING CAPM → GÉNÉRATEUR :
+//   Numparc     → matricule (champ cf_serie ou cf_matricule)
+//   "HANGCHA"   → marque
+//   Type        → modèle
+//   Energie     → motorisation
+//   Capacité    → capacité (kg)
+//   Mat         → mât
+//   Levée       → levée (mm)
+//   Fourches    → fourches (mm)
+//   Batterie    → batterie
+//   Chargeur    → chargeur
+//   TDL         → accessoires
+//   Pneus       → pneus
+//   Cabine      → poste de conduite
+//   divers      → commentaires
+//   Famille     → catégorie auto
+// ============================================================
+
+var CAPM = {
+  API_URL: 'https://intranet.capmeurope.com/api/reseller-stock/Sm8S6De6IBvxCIJoQlNMntKe8tgHlDmFbZXmMS9P568',
+  stock: null,       // Cache des machines
+  lastFetch: null,   // Timestamp du dernier fetch
+  CACHE_TTL: 3600000 // 1h de cache
+};
+
+// ---- FETCH & CACHE ----
+
+async function fetchCAPMStock(forceRefresh) {
+  // Utilise le cache si dispo et pas expiré
+  if (!forceRefresh && CAPM.stock && CAPM.lastFetch && (Date.now() - CAPM.lastFetch < CAPM.CACHE_TTL)) {
+    return CAPM.stock;
+  }
+  try {
+    var resp = await fetch(CAPM.API_URL);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    CAPM.stock = data.machines || [];
+    CAPM.lastFetch = Date.now();
+    console.log('[CAPM] Stock chargé : ' + CAPM.stock.length + ' machines');
+    return CAPM.stock;
+  } catch (e) {
+    console.error('[CAPM] Erreur de chargement :', e);
+    // Fallback : essai via proxy CORS si l'appel direct échoue
+    try {
+      var proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(CAPM.API_URL);
+      var resp2 = await fetch(proxyUrl);
+      if (!resp2.ok) throw new Error('Proxy HTTP ' + resp2.status);
+      var data2 = await resp2.json();
+      CAPM.stock = data2.machines || [];
+      CAPM.lastFetch = Date.now();
+      console.log('[CAPM] Stock chargé via proxy : ' + CAPM.stock.length + ' machines');
+      return CAPM.stock;
+    } catch (e2) {
+      console.error('[CAPM] Proxy aussi en échec :', e2);
+      throw new Error('Impossible de charger le stock CAPM. Vérifiez votre connexion.');
+    }
+  }
+}
+
+// ---- RECHERCHE ----
+
+function searchCAPM(query, machines) {
+  if (!query || query.length < 2) return [];
+  var q = query.toUpperCase().trim();
+  var results = [];
+  for (var i = 0; i < machines.length; i++) {
+    var m = machines[i];
+    // Recherche sur N° de parc, modèle, capacité
+    var match = (m.Numparc && m.Numparc.toUpperCase().indexOf(q) > -1)
+             || (m.Type && m.Type.toUpperCase().indexOf(q) > -1)
+             || (m.Capacité && (m.Capacité + ' kg').indexOf(q) > -1);
+    if (match) {
+      results.push(m);
+      if (results.length >= 20) break; // Limite les résultats affichés
+    }
+  }
+  return results;
+}
+
+// ---- REMPLISSAGE FORMULAIRE ----
+// Adapte les IDs des champs ci-dessous à ton générateur V3
+
+function fillFormFromCAPM(machine) {
+  var m = machine;
+
+  // Helper : remplir un champ par ID s'il existe
+  function fill(id, val) {
+    var el = document.getElementById(id);
+    if (el && val) {
+      el.value = val;
+      // Déclenche les événements pour que le preview se mette à jour
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  // ---- Auto-sélection de la catégorie ----
+  var famille = (m.Famille || '').toLowerCase();
+  if (famille.indexOf('chariot') > -1) {
+    if (typeof setCategory === 'function') setCategory('chariot');
+  } else if (famille.indexOf('gerbeur') > -1) {
+    if (typeof setCategory === 'function') setCategory('gerbeur');
+  } else if (famille.indexOf('transpalette') > -1) {
+    if (typeof setCategory === 'function') setCategory('transpalette');
+  } else if (famille.indexOf('nacelle') > -1) {
+    if (typeof setCategory === 'function') setCategory('nacelle');
+  } else if (famille.indexOf('nettoyage') > -1) {
+    if (typeof setCategory === 'function') setCategory('nettoyage');
+  }
+
+  // Petite temporisation pour que les champs de la catégorie soient rendus
+  setTimeout(function() {
+    // ---- Champs principaux ----
+    fill('cf_marque', 'HANGCHA');
+    fill('cf_modele', m.Type || '');
+    // N° de parc → matricule ou série selon le champ existant
+    fill('cf_matricule', m.Numparc || '');
+    fill('cf_serie', m.Numparc || '');
+    fill('cf_capacite', m.Capacité ? m.Capacité + ' kg' : '');
+    fill('cf_motorisation', m.Energie || '');
+    fill('cf_mat', m.Mat ? m.Mat + (m.Caracteristiques ? ' (' + m.Caracteristiques + ')' : '') : '');
+    fill('cf_levee', m.Levée ? m.Levée + ' mm' : '');
+    fill('cf_fourches', m.Fourches ? m.Fourches + ' mm' : '');
+    fill('cf_batterie', m.Batterie || '');
+    fill('cf_chargeur', m.Chargeur || '');
+    fill('cf_poids', ''); // Non dispo dans CAPM
+    fill('cf_annee', ''); // Neuf = année en cours
+    fill('cf_heures', '0'); // Neuf = 0h
+
+    // ---- Accessoires / options ----
+    var accParts = [];
+    if (m.TDL) accParts.push(m.TDL);
+    if (m.Pneus) accParts.push('Pneus : ' + m.Pneus);
+    if (m.Cabine) accParts.push('Poste : ' + m.Cabine);
+    fill('cf_accessoires', accParts.join('\n'));
+    fill('cf_acc', accParts.join('\n'));
+
+    // ---- Commentaires / divers ----
+    var commentaire = '';
+    if (m.divers) commentaire = m.divers.replace(/;\s*/g, '\n');
+    if (m.Datereception) {
+      var dateArr = m.Datereception.split('T')[0];
+      commentaire += '\nDate arrivage prévue : ' + dateArr;
+    }
+    fill('cf_commentaires', commentaire.trim());
+
+    // ---- État = Neuf ----
+    var etatEl = document.getElementById('etat_materiel');
+    if (etatEl) { etatEl.value = 'Neuf'; etatEl.dispatchEvent(new Event('change', { bubbles: true })); }
+
+    // ---- Rafraîchir l'aperçu ----
+    if (typeof renderPreview === 'function') renderPreview();
+    if (typeof rp === 'function') rp();
+
+    console.log('[CAPM] Formulaire rempli avec ' + m.Numparc + ' — ' + m.Type);
+  }, 150);
+}
+
+// ---- MODALE UI ----
+
+function openCAPMModal() {
+  var modal = document.getElementById('capm-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'capm-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML =
+    '<div class="capm-overlay" onclick="closeCAPMModal()">' +
+    '<div class="capm-dialog" onclick="event.stopPropagation()">' +
+      '<div class="capm-header">' +
+        '<h3>🔗 Stock HANGCHA — CAPM Europe</h3>' +
+        '<button onclick="closeCAPMModal()" class="capm-close">✕</button>' +
+      '</div>' +
+      '<div class="capm-body">' +
+        '<input id="capm-search" type="text" placeholder="Rechercher par N° de parc ou modèle..." autocomplete="off" oninput="onCAPMSearch()">' +
+        '<div id="capm-status" class="capm-status">Chargement du stock...</div>' +
+        '<div id="capm-results" class="capm-results"></div>' +
+      '</div>' +
+    '</div>' +
+    '</div>';
+
+  modal.querySelector('.capm-overlay').style.display = 'flex';
+
+  // Injecter les styles si pas encore fait
+  if (!document.getElementById('capm-styles')) {
+    var style = document.createElement('style');
+    style.id = 'capm-styles';
+    style.textContent =
+      '.capm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px}' +
+      '.capm-dialog{background:var(--color-background-primary,#fff);border-radius:12px;width:100%;max-width:700px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
+      '.capm-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--color-border-tertiary,#e5e5e5)}' +
+      '.capm-header h3{margin:0;font-size:16px;color:var(--mc-blue,#003087)}' +
+      '.capm-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--color-text-secondary,#666);padding:4px 8px}' +
+      '.capm-body{padding:16px 20px;overflow-y:auto;flex:1}' +
+      '#capm-search{width:100%;padding:10px 14px;font-size:14px;border:1.5px solid var(--mc-blue,#003087);border-radius:8px;outline:none;margin-bottom:12px;box-sizing:border-box}' +
+      '#capm-search:focus{box-shadow:0 0 0 3px rgba(0,48,135,.15)}' +
+      '.capm-status{font-size:13px;color:var(--color-text-secondary,#888);padding:8px 0}' +
+      '.capm-results{display:flex;flex-direction:column;gap:6px}' +
+      '.capm-item{display:grid;grid-template-columns:90px 100px 1fr 70px 70px;gap:8px;align-items:center;padding:10px 12px;border:1px solid var(--color-border-tertiary,#e5e5e5);border-radius:8px;cursor:pointer;font-size:13px;transition:all .15s}' +
+      '.capm-item:hover{border-color:var(--mc-blue,#003087);background:var(--mc-blue-light,#e8eef8)}' +
+      '.capm-item .np{font-weight:700;color:var(--mc-blue,#003087)}' +
+      '.capm-item .type{font-weight:500}' +
+      '.capm-item .details{color:var(--color-text-secondary,#666);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.capm-item .cap{text-align:right;font-weight:600}' +
+      '.capm-item .lev{text-align:right;color:var(--color-text-secondary,#666)}' +
+      '@media(max-width:600px){.capm-item{grid-template-columns:80px 1fr;font-size:12px}.capm-item .details,.capm-item .lev{display:none}}';
+    document.head.appendChild(style);
+  }
+
+  // Charger le stock
+  fetchCAPMStock().then(function(machines) {
+    var statusEl = document.getElementById('capm-status');
+    if (statusEl) statusEl.textContent = machines.length + ' machines disponibles — Tapez un N° de parc ou modèle';
+    var searchEl = document.getElementById('capm-search');
+    if (searchEl) searchEl.focus();
+  }).catch(function(e) {
+    var statusEl = document.getElementById('capm-status');
+    if (statusEl) statusEl.textContent = '❌ ' + e.message;
+  });
+}
+
+function closeCAPMModal() {
+  var overlay = document.querySelector('.capm-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+var _capmSearchTimer = null;
+function onCAPMSearch() {
+  clearTimeout(_capmSearchTimer);
+  _capmSearchTimer = setTimeout(function() {
+    var query = document.getElementById('capm-search').value;
+    var results = searchCAPM(query, CAPM.stock || []);
+    var container = document.getElementById('capm-results');
+    if (!container) return;
+
+    if (!query || query.length < 2) {
+      container.innerHTML = '';
+      return;
+    }
+
+    if (!results.length) {
+      container.innerHTML = '<div class="capm-status">Aucun résultat pour "' + query + '"</div>';
+      return;
+    }
+
+    var html = '';
+    results.forEach(function(m) {
+      var accShort = (m.Accessoire || m.TDL || '').substring(0, 50);
+      html += '<div class="capm-item" onclick=\'selectCAPMMachine("' + m.Numparc + '")\'>' +
+        '<span class="np">' + m.Numparc + '</span>' +
+        '<span class="type">' + (m.Type || '') + '</span>' +
+        '<span class="details">' + (m.Energie || '') + ' — ' + accShort + '</span>' +
+        '<span class="cap">' + (m.Capacité || '?') + ' kg</span>' +
+        '<span class="lev">' + (m.Levée || '?') + ' mm</span>' +
+      '</div>';
+    });
+    container.innerHTML = html;
+  }, 200);
+}
+
+function selectCAPMMachine(numparc) {
+  var machine = (CAPM.stock || []).find(function(m) { return m.Numparc === numparc; });
+  if (!machine) return;
+  fillFormFromCAPM(machine);
+  closeCAPMModal();
+
+  // Notification
+  if (typeof showToast === 'function') {
+    showToast('✅ ' + numparc + ' — HANGCHA ' + machine.Type + ' importé depuis CAPM', 'success');
+  }
+}
+
+// ---- INIT ----
+
+function initCAPM() {
+  // Précharge le stock en arrière-plan
+  fetchCAPMStock().then(function() {
+    console.log('[CAPM] Stock pré-chargé en arrière-plan');
+  }).catch(function() {
+    console.warn('[CAPM] Pré-chargement échoué, sera tenté à l\'ouverture de la modale');
+  });
+}
+
+// ============================================================
+// UTILISATION RAPIDE :
+//
+//   // Dans ta page, après le chargement :
+//   initCAPM();
+//
+//   // Pour ouvrir la modale de recherche :
+//   openCAPMModal();
+//
+//   // Pour remplir directement par N° de parc (sans modale) :
+//   fetchCAPMStock().then(function(machines) {
+//     var m = machines.find(function(x) { return x.Numparc === 'N14897'; });
+//     if (m) fillFormFromCAPM(m);
+//   });
+//
+// ============================================================  
 </script>
 </body>
 </html>
